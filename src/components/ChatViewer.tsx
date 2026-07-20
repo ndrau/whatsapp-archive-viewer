@@ -111,7 +111,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             return header + TEXT_LINE_HEIGHT + footer + bubble + SIZE_BUFFER;
           }
           if (count === 1) return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
-          if (count === 2) return header + 170 + captionHeight + footer + bubble + SIZE_BUFFER;
+          // 2-image albums often stack (two landscapes) — reserve taller than a side-by-side pair.
+          if (count === 2) return header + 360 + captionHeight + footer + bubble + SIZE_BUFFER;
+          if (count === 3) return header + 320 + captionHeight + footer + bubble + SIZE_BUFFER;
           return header + 330 + captionHeight + footer + bubble + SIZE_BUFFER;
         }
 

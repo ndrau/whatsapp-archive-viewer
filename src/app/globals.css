@@ -80,29 +80,88 @@ code {
 
 .media-grid {
   display: grid;
-  gap: 2px;
+  gap: 2px; /* WhatsApp-style hairline between album tiles */
+  background: color-mix(in srgb, var(--wa-muted) 35%, transparent);
+}
+
+.media-grid-cell {
+  display: block;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  cursor: pointer;
+  background: #0000000d;
 }
 
 .media-grid-1 {
   grid-template-columns: 1fr;
 }
 
-.media-grid-2 {
+.media-grid-1 > .media-grid-cell {
+  aspect-ratio: 4 / 3;
+  max-height: 280px;
+}
+
+/* Two landscapes (or mixed leaning landscape): stacked with horizontal divider */
+.media-grid-2-stack {
+  grid-template-columns: 1fr;
+}
+
+.media-grid-2-stack > .media-grid-cell {
+  aspect-ratio: 4 / 3;
+  max-height: 200px;
+}
+
+/* Two portraits: side-by-side with vertical divider */
+.media-grid-2-split {
   grid-template-columns: repeat(2, 1fr);
 }
 
-.media-grid-3 {
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+.media-grid-2-split > .media-grid-cell {
+  aspect-ratio: 3 / 4;
+  max-height: 260px;
 }
 
-.media-grid-3 > :first-child {
+/* Three landscapes: one on top, two below */
+.media-grid-3-stack {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.media-grid-3-stack > .media-grid-cell:first-child {
+  grid-column: span 2;
+  aspect-ratio: 16 / 10;
+  max-height: 200px;
+}
+
+.media-grid-3-stack > .media-grid-cell:not(:first-child) {
+  aspect-ratio: 4 / 3;
+  max-height: 140px;
+}
+
+/* Three portraits / mixed: tall left + two stacked right */
+.media-grid-3-split {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.media-grid-3-split > .media-grid-cell:first-child {
   grid-row: span 2;
+  aspect-ratio: 3 / 4;
+  max-height: 320px;
+}
+
+.media-grid-3-split > .media-grid-cell:not(:first-child) {
+  aspect-ratio: 1;
+  max-height: 158px;
 }
 
 .media-grid-4 {
   grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+}
+
+.media-grid-4 > .media-grid-cell {
+  aspect-ratio: 1;
+  max-height: 160px;
 }
 
 .voice-message button {
