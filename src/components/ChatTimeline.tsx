@@ -109,6 +109,8 @@ export const ChatTimeline = memo(
     const [hoverDay, setHoverDay] = useState<TimelineDay | undefined>();
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [displayYear, setDisplayYear] = useState<number | undefined>();
+    const displayYearRef = useRef<number | undefined>(undefined);
+    const paintedDayKeyRef = useRef<string | undefined>(undefined);
 
     const SCRUB_DRAG_THRESHOLD_PX = 4;
 
@@ -129,7 +131,17 @@ export const ChatTimeline = memo(
         day,
         trackRatio,
       );
-      if (day) setDisplayYear(day.date.getFullYear());
+
+      // Year highlight is React state — only update when the year actually changes
+      // so scroll-synced previews do not re-render the sidebar every frame.
+      if (day && day.key !== paintedDayKeyRef.current) {
+        paintedDayKeyRef.current = day.key;
+        const year = day.date.getFullYear();
+        if (displayYearRef.current !== year) {
+          displayYearRef.current = year;
+          setDisplayYear(year);
+        }
+      }
     }, []);
 
     useImperativeHandle(ref, () => ({

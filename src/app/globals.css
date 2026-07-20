@@ -52,7 +52,6 @@ code {
 
 .virtual-chat-row {
   contain: layout style;
-  will-change: transform;
 }
 
 .chat-scroll::-webkit-scrollbar {

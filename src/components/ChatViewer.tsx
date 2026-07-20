@@ -2,7 +2,6 @@
 
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -74,6 +73,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const scrubbingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const lastScrollTimeRef = useRef(0);
+  /** Skip ResizeObserver→resize cascades while the user is actively scrolling or a prepend is settling. */
+  const freezeRowMeasureRef = useRef(false);
+  const lastPreviewDayKeyRef = useRef<string | undefined>(undefined);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeDayKey, setActiveDayKey] = useState<string>();
@@ -164,15 +166,22 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateRowSize(rows[index]),
-    overscan: 8,
+    overscan: 12,
     gap: ROW_GAP_PX,
     getItemKey: (index) => rows[index]?.id ?? index,
-    measureElement: (element) => element.getBoundingClientRect().height,
+    useScrollendEvent: true,
+    isScrollingResetDelay: 180,
+    // During scroll / prepend settle: keep cached/estimated sizes so image loads
+    // and late layout cannot nudge scrollTop (the micro-jerk in the recording).
+    measureElement: (element, _entry, instance) => {
+      if (instance.isScrolling || freezeRowMeasureRef.current) {
+        const index = instance.indexFromElement(element);
+        const key = instance.options.getItemKey(index);
+        return instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
+      }
+      return Math.round((element as HTMLElement).offsetHeight);
+    },
   });
-
-  useLayoutEffect(() => {
-    rowVirtualizer.measure();
-  }, [messages, rowVirtualizer]);
 
   useLayoutEffect(() => {
     const anchor = scrollAnchorRef.current;
@@ -181,11 +190,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
     scrollAnchorRef.current = null;
     container.scrollTop = anchor.top + (container.scrollHeight - anchor.height);
+    // Keep sizes frozen until the next scroll-idle tick so RO cannot fight the anchor.
+    freezeRowMeasureRef.current = true;
   }, [messages]);
 
   const previewTimelineDay = useCallback(
     (dayKey?: string) => {
-      if (!dayKey) return;
+      if (!dayKey || dayKey === lastPreviewDayKeyRef.current) return;
+      lastPreviewDayKeyRef.current = dayKey;
       const day = timelineDayByKey.get(dayKey);
       if (!day) return;
 
@@ -276,12 +288,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (options?.scrollTarget) {
           pendingScrollRef.current = options.scrollTarget;
           activeDayRef.current = options.scrollTarget.dayKey;
+          lastPreviewDayKeyRef.current = undefined;
           setActiveDayKey(options.scrollTarget.dayKey);
           previewTimelineDay(options.scrollTarget.dayKey);
         } else if (!options?.preserveScroll) {
           const fallbackDay = response.dayKeys.at(-1);
           pendingScrollRef.current = { dayKey: fallbackDay, align: "end" };
           activeDayRef.current = fallbackDay;
+          lastPreviewDayKeyRef.current = undefined;
           setActiveDayKey(fallbackDay);
           previewTimelineDay(fallbackDay);
         }
@@ -315,6 +329,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       // Pin timeline + scroll-sync to the clicked day while the jump settles.
       jumpLockUntilRef.current = performance.now() + JUMP_LOCK_MS;
       activeDayRef.current = dayKey;
+      lastPreviewDayKeyRef.current = undefined;
       setActiveDayKey(dayKey);
       previewTimelineDay(dayKey);
 
@@ -453,6 +468,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (!fromDay || !toDay || nextStart === start) return false;
 
         extendLoadingRef.current = true;
+        freezeRowMeasureRef.current = true;
 
         if (container) {
           scrollAnchorRef.current = {
@@ -470,18 +486,20 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
           windowRangeRef.current = { start: nextStart, end };
 
-          startTransition(() => {
-            setMessages((current) => {
-              const knownIds = new Set(current.map((message) => message.id));
-              const prepended = incoming.filter((message) => !knownIds.has(message.id));
-              if (prepended.length === 0) return current;
-              return [...prepended, ...current];
-            });
+          // Sync update (not startTransition): layout-effect scroll anchoring must run
+          // in the same commit as the prepend, otherwise mid-scroll prepends jerk.
+          setMessages((current) => {
+            const knownIds = new Set(current.map((message) => message.id));
+            const prepended = incoming.filter((message) => !knownIds.has(message.id));
+            if (prepended.length === 0) return current;
+            return [...prepended, ...current];
           });
 
           return true;
         } catch (error) {
           console.error("Ältere Nachrichten konnten nicht geladen werden.", error);
+          freezeRowMeasureRef.current = false;
+          scrollAnchorRef.current = null;
           return false;
         } finally {
           extendLoadingRef.current = false;
@@ -505,13 +523,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
           windowRangeRef.current = { start, end: nextEnd };
 
-          startTransition(() => {
-            setMessages((current) => {
-              const knownIds = new Set(current.map((message) => message.id));
-              const appended = incoming.filter((message) => !knownIds.has(message.id));
-              if (appended.length === 0) return current;
-              return [...current, ...appended];
-            });
+          setMessages((current) => {
+            const knownIds = new Set(current.map((message) => message.id));
+            const appended = incoming.filter((message) => !knownIds.has(message.id));
+            if (appended.length === 0) return current;
+            return [...current, ...appended];
           });
 
           return true;
@@ -589,6 +605,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (activeDayRef.current) {
           setActiveDayKey(activeDayRef.current);
         }
+
+        // After scroll settles: allow real measurements once, then optionally extend.
+        freezeRowMeasureRef.current = false;
+        rowVirtualizer.measure();
+
         if (performance.now() >= jumpLockUntilRef.current) {
           void maybeExtendWindow();
         }
@@ -601,7 +622,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       clearTimeout(extendTimerRef.current);
       clearTimeout(overlayHideTimerRef.current);
     };
-  }, [maybeExtendWindow, previewTimelineDay, resolveActiveDayFromScroll, scheduleHandleHide, searchActive]);
+  }, [
+    maybeExtendWindow,
+    previewTimelineDay,
+    resolveActiveDayFromScroll,
+    rowVirtualizer,
+    scheduleHandleHide,
+    searchActive,
+  ]);
 
   const openMedia = useCallback((items: MediaGalleryItem[], index: number) => {
     setLightbox({ items, index });
@@ -648,9 +676,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   return (
     <>
       <div className="relative flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-[var(--wa-chat-bg)]/90 shadow-inner">
-        <div ref={scrollRef} className="chat-scroll min-h-0 flex-1 overflow-y-auto p-4 pr-2">
+        <div ref={scrollRef} className="chat-scroll relative min-h-0 flex-1 overflow-y-auto p-4 pr-2">
           {loadingWindow && (
-            <div className="mb-3 text-center text-xs text-[var(--wa-muted)]">Nachrichten werden geladen…</div>
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-10 text-center text-xs text-[var(--wa-muted)]">
+              Nachrichten werden geladen…
+            </div>
           )}
 
           <VirtualChatRows
@@ -721,6 +751,7 @@ interface VirtualChatRowsProps {
       start: number;
       size: number;
     }>;
+    measureElement: (node: Element | null) => void;
   };
   rows: VirtualChatRow[];
   exportData: WhatsAppExport;

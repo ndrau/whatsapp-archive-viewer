@@ -104,29 +104,47 @@ export const MobileTimelineScrubber = memo(
 
       const displayDay = scrubDay ?? activeDay;
 
+      const lastSyncedDayKeyRef = useRef<string | undefined>(undefined);
+      const displayYearRef = useRef<number | undefined>(undefined);
+
       const syncHandlePosition = useCallback(
         (dayKey: string | undefined) => {
           const day = dayKey ? dayByKey.get(dayKey) : activeDay;
           if (!day) return;
-          setHandleTop(dayTopPercent(day));
-          setDisplayYear(day.date.getFullYear());
+
+          const top = dayTopPercent(day);
+          if (day.key !== lastSyncedDayKeyRef.current) {
+            lastSyncedDayKeyRef.current = day.key;
+            setHandleTop(top);
+          }
+
+          const year = day.date.getFullYear();
+          if (displayYearRef.current !== year) {
+            displayYearRef.current = year;
+            setDisplayYear(year);
+          }
         },
         [activeDay, dayByKey],
       );
 
       useImperativeHandle(ref, () => ({
         setActiveDay(dayKey) {
+          if (dayKey === activeDayKeyRef.current && !isScrubbingRef.current) {
+            // Still allow first sync / position catch-up when unchanged key but
+            // handle was never placed for this day after a jump.
+            if (lastSyncedDayKeyRef.current === dayKey) return;
+          }
           activeDayKeyRef.current = dayKey;
           if (isScrubbingRef.current) return;
           syncHandlePosition(dayKey);
         },
         showHandle() {
-          if (isScrubbingRef.current) return;
+          if (isScrubbingRef.current || handleVisibleRef.current) return;
           handleVisibleRef.current = true;
           setHandleVisible(true);
         },
         hideHandle() {
-          if (isScrubbingRef.current) return;
+          if (isScrubbingRef.current || !handleVisibleRef.current) return;
           handleVisibleRef.current = false;
           setHandleVisible(false);
         },
