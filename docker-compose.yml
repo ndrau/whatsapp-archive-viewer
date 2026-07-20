@@ -1,17 +1,22 @@
-# Heimnetz-Deployment (TrueNAS Scale / Portainer)
+# TrueNAS / Portainer — Image von GitHub Container Registry, Daten per Volume
 #
-# 1) Datasets anlegen (Beispiel-Pfade anpassen):
-#      /mnt/tank/apps/whatsapp-archive/chats
-#      /mnt/tank/apps/whatsapp-archive/built
-# 2) Chat-Export nach chats/denise/ kopieren (_chat.txt + Medien + meta.json)
-# 3) Unten host-Pfade setzen, dann:
-#      docker compose up -d --build
-# 4) Im Heimnetz: http://<truenas-ip>:3080
+# 1) Datasets anlegen und Pfade unten anpassen:
+#      /mnt/tank/apps/whatsapp-archive/chats   ← Roh-Exporte (andy/_chat.txt + Medien)
+#      /mnt/tank/apps/whatsapp-archive/built  ← generiert (leer lassen, App füllt)
+# 2) ARCHIVE_PASSWORD + AUTH_SECRET setzen
+# 3) Portainer → Stacks → diese Datei einfügen → Deploy
+# 4) http://<truenas-ip>:3080
+#
+# Image enthält KEINE Chat-Daten — nur die App.
+# Erstes Image-Push: GitHub Actions auf main → ghcr.io/ndrau/whatsapp-archive-viewer:latest
+# Package ggf. unter github.com → Packages auf "Public" stellen (sonst Registry-Login in Portainer).
 
 services:
   whatsapp-archive:
-    build: .
-    image: whatsapp-archive-viewer:local
+    image: ghcr.io/ndrau/whatsapp-archive-viewer:latest
+    # Lokal selbst bauen statt pullen:
+    # build: .
+    # image: whatsapp-archive-viewer:local
     container_name: whatsapp-archive
     restart: unless-stopped
     ports:
@@ -20,22 +25,16 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      # Day-keys are derived from local calendar dates — keep build & runtime in sync.
       TZ: Europe/Berlin
-      # 1 = beim Start chats/ neu parsen (empfohlen nach Export-Update)
+      # 1 = beim Start chats/ neu parsen (nach Export-Update)
       # 0 = vorhandenes .built Volume nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"
-      # Login: gemeinsames Archiv-Passwort + Secret zum Signieren der Session (mind. 32 Zeichen).
-      # Session-Cookie gilt bis Mitternacht Europe/Berlin.
-      # Beispiel-Secret erzeugen: openssl rand -base64 32
+      # Login — bitte ändern (Secret: openssl rand -base64 32)
       ARCHIVE_PASSWORD: "CHANGE_ME"
       AUTH_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARS"
-      # Lokal ohne Login: ARCHIVE_AUTH_DISABLED: "1"
     volumes:
-      # Rohdaten — bleiben bei Image-Updates erhalten (read-only reicht)
+      # Host-Pfad links = wo deine Chat-Dateien auf dem NAS liegen
       - /mnt/tank/apps/whatsapp-archive/chats:/app/chats:ro
-      # Generierte App-Daten — bei Bedarf löschen + Container neu starten
       - /mnt/tank/apps/whatsapp-archive/built:/app/.built
     # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
     # user: "0:0"
-    # Nur Heimnetz: kein Port-Forward am Router
