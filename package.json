@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "busboy": "^1.6.0",
-    "jszip": "^3.10.1",
     "next": "15.5.19",
     "react": "19.1.0",
     "react-dom": "19.1.0"

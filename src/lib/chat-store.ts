@@ -119,23 +119,6 @@ export async function loadMessagesForDayRange(
   };
 }
 
-export async function loadAllBuiltMessages(slug: string): Promise<BuiltMessageRecord[]> {
-  const index = await readBuiltChatIndex(slug);
-  if (!index) {
-    throw new Error("Chat-Index nicht gefunden.");
-  }
-
-  const messages: BuiltMessageRecord[] = [];
-
-  for (const chunkMeta of index.chunks) {
-    const chunk = await readBuiltChunk(slug, chunkMeta.file);
-    if (!chunk) continue;
-    messages.push(...chunk.messages);
-  }
-
-  return messages;
-}
-
 export async function searchBuiltChat(
   slug: string,
   query: string,

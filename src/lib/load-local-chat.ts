@@ -129,20 +129,3 @@ export async function loadChatMessageRange(
 
   return (await response.json()) as ChatMessagesResponse;
 }
-
-export async function loadAllMessagesForExport(slug: string): Promise<ChatMessage[]> {
-  const response = await fetch(`/api/chats/${slug}/messages?all=1`);
-
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(payload?.error ?? "Nachrichten konnten nicht geladen werden.");
-  }
-
-  const data = (await response.json()) as ChatMessagesResponse;
-  return data.messages
-    .map((message) => ({
-      ...message,
-      date: new Date(message.date),
-    }))
-    .sort((left, right) => left.date.getTime() - right.date.getTime());
-}

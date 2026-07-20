@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { DEFAULT_DAY_RADIUS, selectDayRange } from "@/lib/chat-day";
 import {
-  loadAllBuiltMessages,
   loadMessagesForDayRange,
   loadMessagesForDayWindow,
   readBuiltChatIndex,
@@ -24,11 +23,6 @@ export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { slug } = await params;
     const url = new URL(request.url);
-
-    if (url.searchParams.get("all") === "1") {
-      const messages = await loadAllBuiltMessages(slug);
-      return NextResponse.json({ messages });
-    }
 
     const fromDay = url.searchParams.get("fromDay");
     const toDay = url.searchParams.get("toDay");

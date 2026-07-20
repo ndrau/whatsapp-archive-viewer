@@ -5,10 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ChatViewer } from "@/components/ChatViewer";
 import { LocalChatList } from "@/components/LocalChatList";
 import { LogoutButton } from "@/components/LogoutButton";
-import { downloadHtmlArchive } from "@/lib/export-html";
 import { getMediaKind, isVoiceMessage } from "@/lib/media-types";
 import {
-  loadAllMessagesForExport,
   loadChatIndex,
   toWhatsAppExport,
   type ChatIndexResponse,
@@ -22,7 +20,6 @@ export function ArchiveApp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   const exportData = useMemo<WhatsAppExport | null>(() => {
     if (!chatIndex) return null;
@@ -33,19 +30,19 @@ export function ArchiveApp() {
   const stats = useMemo(() => {
     if (!chatIndex) return null;
 
-    const stats = { images: 0, videos: 0, audio: 0, voice: 0 };
+    const next = { images: 0, videos: 0, audio: 0, voice: 0 };
 
     for (const filename of chatIndex.mediaFiles) {
       const kind = getMediaKind(filename);
-      if (kind === "image" || kind === "sticker") stats.images += 1;
-      else if (kind === "video") stats.videos += 1;
+      if (kind === "image" || kind === "sticker") next.images += 1;
+      else if (kind === "video") next.videos += 1;
       else if (kind === "audio") {
-        stats.audio += 1;
-        if (isVoiceMessage(filename)) stats.voice += 1;
+        next.audio += 1;
+        if (isVoiceMessage(filename)) next.voice += 1;
       }
     }
 
-    return stats;
+    return next;
   }, [chatIndex]);
 
   useEffect(() => {
@@ -126,32 +123,6 @@ export function ArchiveApp() {
                 }}
               >
                 Zurück
-              </button>
-              <button
-                type="button"
-                disabled={exporting || !myName}
-                className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--wa-accent)] disabled:opacity-50"
-                onClick={async () => {
-                  if (!myName) return;
-                  setExporting(true);
-                  try {
-                    const messages = await loadAllMessagesForExport(chatIndex.slug);
-                    await downloadHtmlArchive(
-                      toWhatsAppExport(chatIndex, messages),
-                      myName,
-                    );
-                  } catch (exportError) {
-                    setError(
-                      exportError instanceof Error
-                        ? exportError.message
-                        : "Speichern als Datei ist fehlgeschlagen.",
-                    );
-                  } finally {
-                    setExporting(false);
-                  }
-                }}
-              >
-                {exporting ? "Wird gespeichert…" : "Als Datei speichern"}
               </button>
               <LogoutButton variant="light" />
             </div>
