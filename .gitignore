@@ -47,3 +47,6 @@ yarn-error.log*
 # WhatsApp-Exporte und Archive
 *.zip
 WhatsApp Chat*.zip
+
+# typescript
+*.tsbuildinfo
