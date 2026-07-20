@@ -11,11 +11,12 @@ import {
   type BuiltSearchIndex,
 } from "@/types/built-chat";
 import { dayKeyFromIso, selectDayRange, selectDayWindow } from "@/lib/chat-day";
+import { resolveSafePath } from "@/lib/slug";
 
 const BUILT_CHATS_DIR = path.join(process.cwd(), ".built", "chats");
 
 function getChatDir(slug: string): string {
-  return path.join(BUILT_CHATS_DIR, slug);
+  return resolveSafePath(BUILT_CHATS_DIR, slug);
 }
 
 export async function readBuiltChatIndex(slug: string): Promise<BuiltChatIndex | null> {
@@ -29,7 +30,8 @@ export async function readBuiltChatIndex(slug: string): Promise<BuiltChatIndex |
 
 export async function readBuiltChunk(slug: string, chunkFile: string): Promise<BuiltChatChunk | null> {
   try {
-    const raw = await fs.readFile(path.join(getChatDir(slug), chunkFile), "utf-8");
+    const filePath = resolveSafePath(BUILT_CHATS_DIR, slug, chunkFile);
+    const raw = await fs.readFile(filePath, "utf-8");
     return JSON.parse(raw) as BuiltChatChunk;
   } catch {
     return null;

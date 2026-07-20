@@ -91,9 +91,26 @@ function parseDotDate(value: string): Date {
 }
 
 function parseSlashDate(value: string): Date {
-  const [month, day, yearPart] = value.split("/");
+  const [firstPart, secondPart, yearPart] = value.split("/");
+  const first = Number(firstPart);
+  const second = Number(secondPart);
   const year = normalizeYear(Number(yearPart));
-  return new Date(year, Number(month) - 1, Number(day));
+
+  // Disambiguate MM/DD vs DD/MM. Prefer day-first (EU) when both ≤ 12.
+  let day: number;
+  let month: number;
+  if (first > 12) {
+    day = first;
+    month = second;
+  } else if (second > 12) {
+    month = first;
+    day = second;
+  } else {
+    day = first;
+    month = second;
+  }
+
+  return new Date(year, month - 1, day);
 }
 
 function normalizeYear(year: number): number {
@@ -281,7 +298,13 @@ function stripDuplicateCaptions(messages: ChatMessage[]): ChatMessage[] {
       if (previous.sender !== message.sender) break;
       if (timeDeltaMs(previous, message) > DUPLICATE_CAPTION_WINDOW_MS) break;
 
-      if (previous.text.trim() === message.text.trim()) {
+      // Only strip when the previous line is also media (album caption repeat),
+      // not when the same short text was sent as a real standalone message.
+      if (
+        previous.attachment &&
+        !previous.attachment.omitted &&
+        previous.text.trim() === message.text.trim()
+      ) {
         return { ...message, text: "" };
       }
     }
@@ -495,11 +518,17 @@ function dedupeNearDuplicateAlbums(
       continue;
     }
 
+    // Require clear byte evidence (preview ≪ HD). Never drop without sizes —
+    // identical captions alone are too common for false positives.
+    if (!getMediaBytes) continue;
     const currentBytes = mediaRunBytes(current.messages, getMediaBytes);
     const nextBytes = mediaRunBytes(next.messages, getMediaBytes);
-    const dropCurrent = nextBytes >= currentBytes;
+    if (currentBytes <= 0 || nextBytes <= 0) continue;
+    const heavier = Math.max(currentBytes, nextBytes);
+    const lighter = Math.min(currentBytes, nextBytes);
+    if (heavier < lighter * 2) continue;
 
-    const doomed = dropCurrent ? current : next;
+    const doomed = nextBytes > currentBytes ? current : next;
     for (let messageIndex = doomed.start; messageIndex < doomed.end; messageIndex += 1) {
       drop.add(messageIndex);
     }

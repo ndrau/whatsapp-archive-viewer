@@ -20,6 +20,8 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      # Day-keys are derived from local calendar dates — keep build & runtime in sync.
+      TZ: Europe/Berlin
       # 1 = beim Start chats/ neu parsen (empfohlen nach Export-Update)
       # 0 = vorhandenes .built Volume nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"

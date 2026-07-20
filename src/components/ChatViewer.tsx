@@ -96,9 +96,8 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const mobileScrubberRef = useRef<MobileTimelineScrubberHandle>(null);
   const isMobileRef = useRef(false);
   const scrubbingRef = useRef(false);
-  const lastScrollTopRef = useRef(0);
-  const lastScrollTimeRef = useRef(0);
   const lastPreviewDayKeyRef = useRef<string | undefined>(undefined);
+  const searchGenerationRef = useRef(0);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeDayKey, setActiveDayKey] = useState<string>();
@@ -158,9 +157,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
         }
         if (attachment?.kind === "audio") {
-          // VoiceMessagePlayer includes its own timestamp; MessageBubble skips the footer.
+          // Match MessageBubble voice-only layout (no sender line / no extra footer).
           if (attachment.filename && isVoiceMessage(attachment.filename) && !message.text.trim()) {
-            return header + VOICE_ROW_HEIGHT + SIZE_BUFFER;
+            return VOICE_ROW_HEIGHT + SIZE_BUFFER;
           }
           return header + 88 + footer + bubble + SIZE_BUFFER;
         }
@@ -414,16 +413,20 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
   useEffect(() => {
     clearTimeout(searchTimerRef.current);
+    const generation = ++searchGenerationRef.current;
 
     searchTimerRef.current = setTimeout(async () => {
       const normalized = searchQuery.trim();
       if (!normalized) {
+        if (generation !== searchGenerationRef.current) return;
         setSearchActive(false);
         setSearchResults([]);
         return;
       }
 
       const response = await searchChatMessages(chatIndex.slug, normalized);
+      if (generation !== searchGenerationRef.current) return;
+
       setSearchActive(true);
       setSearchResults(
         response.results.map((result) => ({
@@ -500,6 +503,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
       const container = scrollRef.current;
       const { start, end } = windowRangeRef.current;
+      const generation = loadGenerationRef.current;
 
       if (direction === "prev" && start > 0) {
         const nextStart = Math.max(0, start - DEFAULT_DAY_RADIUS);
@@ -518,23 +522,30 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
         try {
           const response = await loadChatMessageRange(chatIndex.slug, fromDay, toDay);
+          // Jump/reload bumped the generation — discard stale extend results.
+          if (generation !== loadGenerationRef.current) {
+            scrollAnchorRef.current = null;
+            return false;
+          }
+
           const incoming = response.messages.map((message) => ({
             ...message,
             date: new Date(message.date),
           }));
 
-          windowRangeRef.current = { start: nextStart, end };
-
-          // Sync update (not startTransition): layout-effect scroll anchoring must run
-          // in the same commit as the prepend, otherwise mid-scroll prepends jerk.
+          let didPrepend = false;
           setMessages((current) => {
             const knownIds = new Set(current.map((message) => message.id));
             const prepended = incoming.filter((message) => !knownIds.has(message.id));
             if (prepended.length === 0) return current;
+            didPrepend = true;
+            // Only advance the loaded day window when content actually landed.
+            windowRangeRef.current = { start: nextStart, end };
             return [...prepended, ...current];
           });
 
-          return true;
+          if (!didPrepend) scrollAnchorRef.current = null;
+          return didPrepend;
         } catch (error) {
           console.error("Ältere Nachrichten konnten nicht geladen werden.", error);
           scrollAnchorRef.current = null;
@@ -554,21 +565,24 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
         try {
           const response = await loadChatMessageRange(chatIndex.slug, fromDay, toDay);
+          if (generation !== loadGenerationRef.current) return false;
+
           const incoming = response.messages.map((message) => ({
             ...message,
             date: new Date(message.date),
           }));
 
-          windowRangeRef.current = { start, end: nextEnd };
-
+          let didAppend = false;
           setMessages((current) => {
             const knownIds = new Set(current.map((message) => message.id));
             const appended = incoming.filter((message) => !knownIds.has(message.id));
             if (appended.length === 0) return current;
+            didAppend = true;
+            windowRangeRef.current = { start, end: nextEnd };
             return [...current, ...appended];
           });
 
-          return true;
+          return didAppend;
         } catch (error) {
           console.error("Neuere Nachrichten konnten nicht geladen werden.", error);
           return false;
@@ -613,13 +627,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     const container = scrollRef.current;
     if (!container || searchActive) return;
 
-    lastScrollTopRef.current = container.scrollTop;
-    lastScrollTimeRef.current = performance.now();
-
     const onScroll = () => {
-      lastScrollTopRef.current = container.scrollTop;
-      lastScrollTimeRef.current = performance.now();
-
       const jumpLocked = performance.now() < jumpLockUntilRef.current;
 
       if (!jumpLocked) {
@@ -680,6 +688,12 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       const dayIndex = chatIndex.days.findIndex((day) => day.key === row.dayKey);
       if (dayIndex === -1) return;
 
+      jumpLockUntilRef.current = performance.now() + JUMP_LOCK_MS;
+      activeDayRef.current = row.dayKey;
+      lastPreviewDayKeyRef.current = undefined;
+      setActiveDayKey(row.dayKey);
+      previewTimelineDay(row.dayKey);
+
       const startIndex = Math.max(0, dayIndex - DEFAULT_DAY_RADIUS);
       const endIndex = Math.min(chatIndex.days.length - 1, dayIndex + DEFAULT_DAY_RADIUS);
 
@@ -690,24 +704,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         },
       });
     },
-    [chatIndex.days, loadRangeByIndices],
+    [chatIndex.days, loadRangeByIndices, previewTimelineDay],
   );
 
-  if (searchActive && searchResults.length === 0 && searchQuery.trim()) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl bg-[var(--wa-chat-bg)]/90 p-10 text-center text-[var(--wa-muted)]">
-        Keine Nachrichten für diese Suche gefunden.
-      </div>
-    );
-  }
-
-  if (!searchActive && messages.length === 0 && !loadingWindow) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl bg-[var(--wa-chat-bg)]/90 p-10 text-center text-[var(--wa-muted)]">
-        Keine Nachrichten in diesem Chat.
-      </div>
-    );
-  }
+  const searchEmpty = searchActive && searchResults.length === 0 && Boolean(searchQuery.trim());
+  const chatEmpty = !searchActive && messages.length === 0 && !loadingWindow;
 
   return (
     <>
@@ -719,15 +720,21 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             </div>
           )}
 
-          <VirtualChatRows
-            rowVirtualizer={rowVirtualizer}
-            rows={rows}
-            exportData={exportData}
-            myName={myName}
-            highlightMessageId={highlightMessageId}
-            onOpenMedia={openMedia}
-            onOpenSearchResult={openSearchResult}
-          />
+          {searchEmpty || chatEmpty ? (
+            <div className="flex min-h-[40vh] items-center justify-center p-10 text-center text-[var(--wa-muted)]">
+              {searchEmpty ? "Keine Nachrichten für diese Suche gefunden." : "Keine Nachrichten in diesem Chat."}
+            </div>
+          ) : (
+            <VirtualChatRows
+              rowVirtualizer={rowVirtualizer}
+              rows={rows}
+              exportData={exportData}
+              myName={myName}
+              highlightMessageId={highlightMessageId}
+              onOpenMedia={openMedia}
+              onOpenSearchResult={openSearchResult}
+            />
+          )}
         </div>
 
         {!searchActive && (

@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { readBuiltChatIndex } from "@/lib/chat-store";
+import { isValidSlug, resolveSafePath } from "@/lib/slug";
 
 const CHATS_DIR = path.join(process.cwd(), "chats");
 
@@ -13,28 +14,14 @@ export interface LocalChatSummary {
   mediaCount: number;
 }
 
-function isValidSlug(slug: string): boolean {
-  return /^[a-z0-9-]+$/.test(slug);
-}
+export { isValidSlug };
 
 export function getChatsDirectory(): string {
   return CHATS_DIR;
 }
 
 export function resolveChatDirectory(slug: string): string {
-  if (!isValidSlug(slug)) {
-    throw new Error("Ungültiger Chat-Name.");
-  }
-
-  const chatDir = path.join(CHATS_DIR, slug);
-  const resolved = path.resolve(chatDir);
-  const root = path.resolve(CHATS_DIR);
-
-  if (!resolved.startsWith(`${root}${path.sep}`) && resolved !== root) {
-    throw new Error("Ungültiger Chat-Pfad.");
-  }
-
-  return resolved;
+  return resolveSafePath(CHATS_DIR, slug);
 }
 
 export async function listLocalChats(): Promise<LocalChatSummary[]> {

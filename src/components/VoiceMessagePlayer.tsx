@@ -64,13 +64,6 @@ export function VoiceMessagePlayer({
       }
     }
 
-    function onTimeUpdate() {
-      if (!audio) return;
-      if (!isPlaying) {
-        setCurrentTime(audio.currentTime);
-      }
-    }
-
     function onEnded() {
       if (!audio) return;
       setIsPlaying(false);
@@ -89,26 +82,24 @@ export function VoiceMessagePlayer({
     }
 
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
-    audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("pause", onPause);
     audio.addEventListener("play", onPlay);
 
     return () => {
+      audio.pause();
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
-      audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("play", onPlay);
     };
-  }, [isPlaying, src]);
+  }, [src]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !isPlaying) return;
 
     let frame = 0;
-
     const tick = () => {
       setCurrentTime(audio.currentTime);
       frame = requestAnimationFrame(tick);

@@ -41,34 +41,72 @@ function resolvePairLayout(orientations: Orientation[]): PairLayout {
   return landscapeScore >= portraitScore ? "stack" : "split";
 }
 
-function loadMediaSize(url: string, kind: string): Promise<MediaSize | null> {
-  return new Promise((resolve) => {
-    if (kind === "video") {
-      const video = document.createElement("video");
-      video.preload = "metadata";
+function loadMediaSize(
+  url: string,
+  kind: string,
+): { promise: Promise<MediaSize | null>; cancel: () => void } {
+  let settled = false;
+
+  if (kind === "video") {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+
+    const promise = new Promise<MediaSize | null>((resolve) => {
+      const finish = (size: MediaSize | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(size);
+      };
+
       video.onloadedmetadata = () => {
-        resolve(
+        finish(
           video.videoWidth > 0 && video.videoHeight > 0
             ? { width: video.videoWidth, height: video.videoHeight }
             : null,
         );
       };
-      video.onerror = () => resolve(null);
+      video.onerror = () => finish(null);
       video.src = url;
-      return;
-    }
+    });
 
-    const image = new Image();
+    return {
+      promise,
+      cancel: () => {
+        settled = true;
+        video.removeAttribute("src");
+        video.load();
+      },
+    };
+  }
+
+  const image = new Image();
+  const promise = new Promise<MediaSize | null>((resolve) => {
+    const finish = (size: MediaSize | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(size);
+    };
+
     image.onload = () => {
-      resolve(
+      finish(
         image.naturalWidth > 0 && image.naturalHeight > 0
           ? { width: image.naturalWidth, height: image.naturalHeight }
           : null,
       );
     };
-    image.onerror = () => resolve(null);
+    image.onerror = () => finish(null);
     image.src = url;
   });
+
+  return {
+    promise,
+    cancel: () => {
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      image.src = "";
+    },
+  };
 }
 
 function gridClassName(count: number, pairLayout: PairLayout, trioLayout: PairLayout): string {
@@ -90,13 +128,16 @@ export function MediaGrid({ items, exportData, onOpen }: MediaGridProps) {
 
   useEffect(() => {
     let cancelled = false;
+    const loaders: Array<{ cancel: () => void }> = [];
 
     void (async () => {
       const next = await Promise.all(
         visible.map(async (item) => {
           const url = buildMediaUrl(item.attachment.filename, exportData);
           if (!url) return null;
-          return loadMediaSize(url, item.attachment.kind);
+          const loader = loadMediaSize(url, item.attachment.kind);
+          loaders.push(loader);
+          return loader.promise;
         }),
       );
 
@@ -105,6 +146,7 @@ export function MediaGrid({ items, exportData, onOpen }: MediaGridProps) {
 
     return () => {
       cancelled = true;
+      for (const loader of loaders) loader.cancel();
     };
     // visible is derived from items; mediaKey captures identity
     // eslint-disable-next-line react-hooks/exhaustive-deps
