@@ -48,13 +48,6 @@ code {
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
-  /* Prefer compositor scrolling; avoid paint work tied to scroll position. */
-  overflow-anchor: none;
-}
-
-.virtual-chat-row {
-  contain: layout style;
-  will-change: transform;
 }
 
 .chat-scroll::-webkit-scrollbar {

@@ -1,6 +1,5 @@
 "use client";
 
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback,
   useEffect,
@@ -18,8 +17,6 @@ import { DEFAULT_DAY_RADIUS, dayKeyFromDate } from "@/lib/chat-day";
 import { buildChatTimeline, type TimelineDay } from "@/lib/chat-timeline";
 import {
   buildVirtualRows,
-  findRowIndexForDay,
-  findRowIndexForMessage,
   type VirtualChatRow,
 } from "@/lib/chat-view-rows";
 import {
@@ -28,7 +25,6 @@ import {
   type ChatIndexResponse,
 } from "@/lib/load-local-chat";
 import type { MediaGalleryItem } from "@/lib/media-groups";
-import { isVoiceMessage } from "@/lib/media-types";
 import type { ChatMessage, WhatsAppExport } from "@/types/whatsapp";
 
 interface ChatViewerProps {
@@ -44,45 +40,25 @@ type PendingScroll = {
   align?: "start" | "center" | "end";
 };
 
-const SIZE_BUFFER = 6;
-/**
- * Uniform space after every row. Must live inside the measured row (padding),
- * not as virtualizer `gap` — otherwise estimate/measure drift shows as uneven gaps.
- */
-const ROW_GAP_PX = 10;
-const TEXT_LINE_HEIGHT = 22;
-/** ~bubble content width; slight over-estimate is OK, sticky oversize is not. */
-const TEXT_CHARS_PER_LINE = 40;
-/** Outgoing voice bubble is compact (no sender line / no extra footer). */
-const VOICE_ROW_HEIGHT = 64;
-const SCROLL_IDLE_MS = 220;
-const EXTEND_EDGE_PX = 480;
+/** Prefetch when the edge sentinel enters this margin around the viewport. */
+const EXTEND_ROOT_MARGIN = "800px 0px";
 const HANDLE_HIDE_MS = 1800;
 const JUMP_LOCK_MS = 750;
 
-/** Count wrapped lines including explicit newlines (WhatsApp multi-line messages). */
-function estimateTextLines(text: string): number {
-  const normalized = text.replace(/\r\n/g, "\n").trimEnd();
-  if (!normalized) return 1;
-
-  let lines = 0;
-  for (const paragraph of normalized.split("\n")) {
-    // Long URLs / unbroken tokens wrap less efficiently than plain prose.
-    const tokenPenalty = paragraph.split(/\s+/).reduce((extra, token) => {
-      if (token.length <= TEXT_CHARS_PER_LINE) return extra;
-      return extra + Math.ceil(token.length / TEXT_CHARS_PER_LINE) - 1;
-    }, 0);
-    lines += Math.max(1, Math.ceil(paragraph.length / TEXT_CHARS_PER_LINE) + tokenPenalty);
+function escapeAttr(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
   }
-  return lines;
+  return value.replace(/["\\]/g, "\\$&");
 }
 
 export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const windowLoadingRef = useRef(false);
   const extendLoadingRef = useRef(false);
   const loadGenerationRef = useRef(0);
-  const extendTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollReadyRef = useRef(false);
   const overlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollAnchorRef = useRef<{ height: number; top: number } | null>(null);
@@ -98,6 +74,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const scrubbingRef = useRef(false);
   const lastPreviewDayKeyRef = useRef<string | undefined>(undefined);
   const searchGenerationRef = useRef(0);
+  const extendChainRef = useRef(0);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeDayKey, setActiveDayKey] = useState<string>();
@@ -109,69 +86,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     items: MediaGalleryItem[];
     index: number;
   } | null>(null);
-
-  const estimateRowSize = useCallback(
-    (row: VirtualChatRow | undefined): number => {
-      if (!row) return 72 + SIZE_BUFFER;
-
-      if (row.kind === "day-header") return 36 + SIZE_BUFFER;
-      if (row.kind === "search-result") return 84 + SIZE_BUFFER;
-
-      if (row.kind === "display-item") {
-        if (row.item.kind === "media-group") {
-          const count = row.item.items.length;
-          const header = row.item.sender === myName ? 0 : 22;
-          const footer = 20;
-          const bubble = 16;
-          const captionHeight = row.item.caption
-            ? estimateTextLines(row.item.caption) * TEXT_LINE_HEIGHT
-            : 0;
-
-          // Empty group (shouldn't happen) — treat like a short text row.
-          if (count === 0) {
-            return header + TEXT_LINE_HEIGHT + footer + bubble + SIZE_BUFFER;
-          }
-          if (count === 1) return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
-          // 2-image albums often stack (two landscapes) — reserve taller than a side-by-side pair.
-          if (count === 2) return header + 360 + captionHeight + footer + bubble + SIZE_BUFFER;
-          if (count === 3) return header + 320 + captionHeight + footer + bubble + SIZE_BUFFER;
-          return header + 330 + captionHeight + footer + bubble + SIZE_BUFFER;
-        }
-
-        const message = row.item.message;
-        const attachment = message.attachment;
-        const header = message.sender === myName ? 0 : 22;
-        const footer = 20;
-        const bubble = 16;
-
-        // Omitted / missing media render as a single italic line — never reserve image height.
-        if (attachment && (attachment.omitted || !attachment.filename)) {
-          const textLines = message.text.trim() ? estimateTextLines(message.text) : 1;
-          return header + bubble + textLines * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
-        }
-
-        if (attachment?.kind === "image" || attachment?.kind === "video" || attachment?.kind === "sticker") {
-          const captionHeight = message.text.trim()
-            ? estimateTextLines(message.text) * TEXT_LINE_HEIGHT
-            : 0;
-          return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
-        }
-        if (attachment?.kind === "audio") {
-          // Match MessageBubble voice-only layout (no sender line / no extra footer).
-          if (attachment.filename && isVoiceMessage(attachment.filename) && !message.text.trim()) {
-            return VOICE_ROW_HEIGHT + SIZE_BUFFER;
-          }
-          return header + 88 + footer + bubble + SIZE_BUFFER;
-        }
-
-        const lineCount = estimateTextLines(message.text);
-        return header + bubble + lineCount * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
-      }
-
-      return 72 + SIZE_BUFFER;
-    },
-    [myName],
-  );
 
   const daySections = useMemo(
     () =>
@@ -199,34 +113,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     [messages, searchActive, searchResults],
   );
 
-  const rowVirtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    // Gap is padding inside each row — include it in the estimate too.
-    estimateSize: (index) => estimateRowSize(rows[index]) + ROW_GAP_PX,
-    overscan: 8,
-    gap: 0,
-    getItemKey: (index) => rows[index]?.id ?? index,
-    // Critical for smooth wheel scrolling: while the user is scrolling, never
-    // let ResizeObserver resize rows (that nudges scrollTop → jitter).
-    useScrollendEvent: true,
-    isScrollingResetDelay: 150,
-    useAnimationFrameWithResizeObserver: false,
-    measureElement: (element, _entry, instance) => {
-      const index = instance.indexFromElement(element);
-      if (instance.isScrolling) {
-        const key = instance.options.getItemKey(index);
-        return instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
-      }
-
-      const measured = Math.round((element as HTMLElement).offsetHeight);
-      if (!Number.isFinite(measured) || measured <= 0) {
-        return instance.options.estimateSize(index);
-      }
-      return measured;
-    },
-  });
-
+  // Keep scroll position stable when older messages are prepended.
   useLayoutEffect(() => {
     const anchor = scrollAnchorRef.current;
     const container = scrollRef.current;
@@ -255,23 +142,26 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     const container = scrollRef.current;
     if (!container || rows.length === 0) return undefined;
 
-    const anchor = container.scrollTop + container.clientHeight * 0.22;
-    const virtualItems = rowVirtualizer.getVirtualItems();
-    let nextDayKey: string | undefined;
+    const rootRect = container.getBoundingClientRect();
+    const anchorY = rootRect.top + container.clientHeight * 0.22;
+    const nodes = container.querySelectorAll<HTMLElement>("[data-day-key]");
 
-    for (const item of virtualItems) {
-      if (item.start <= anchor && item.end > anchor) {
-        nextDayKey = rows[item.index]?.dayKey;
-        break;
+    let best: string | undefined;
+    let bestDist = Infinity;
+
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom < rootRect.top - 80 || rect.top > rootRect.bottom + 80) continue;
+      const mid = (rect.top + rect.bottom) / 2;
+      const dist = Math.abs(mid - anchorY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = node.dataset.dayKey;
       }
     }
 
-    if (!nextDayKey) {
-      nextDayKey = rows[virtualItems[0]?.index ?? 0]?.dayKey;
-    }
-
-    return nextDayKey;
-  }, [rowVirtualizer, rows]);
+    return best;
+  }, [rows.length]);
 
   const scheduleHandleHide = useCallback(() => {
     clearTimeout(overlayHideTimerRef.current);
@@ -281,20 +171,57 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     }, HANDLE_HIDE_MS);
   }, []);
 
-  const getScrollEdges = useCallback(() => {
+  const applyPendingScroll = useCallback(() => {
+    const target = pendingScrollRef.current;
     const container = scrollRef.current;
-    if (!container) return null;
+    if (!target || !container) {
+      scrollReadyRef.current = true;
+      return;
+    }
 
-    const distanceTop = container.scrollTop;
-    const distanceBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
+    pendingScrollRef.current = null;
 
-    return {
-      nearTop: distanceTop < EXTEND_EDGE_PX,
-      nearBottom: distanceBottom < EXTEND_EDGE_PX,
-      distanceTop,
-      distanceBottom,
+    const scrollOnce = (): boolean => {
+      if (target.messageId) {
+        const el = container.querySelector<HTMLElement>(
+          `[data-message-id="${escapeAttr(target.messageId)}"]`,
+        );
+        if (el) {
+          el.scrollIntoView({ block: "center", behavior: "auto" });
+          return true;
+        }
+        return false;
+      }
+
+      if (target.dayKey) {
+        const el = container.querySelector<HTMLElement>(
+          `[data-day-header="${escapeAttr(target.dayKey)}"]`,
+        );
+        if (el) {
+          el.scrollIntoView({
+            block: target.align === "end" ? "end" : "start",
+            behavior: "auto",
+          });
+          return true;
+        }
+      }
+
+      if (target.align === "end") {
+        container.scrollTop = container.scrollHeight;
+        return true;
+      }
+
+      return false;
     };
+
+    scrollOnce();
+    requestAnimationFrame(() => {
+      scrollOnce();
+      requestAnimationFrame(() => {
+        scrollOnce();
+        scrollReadyRef.current = true;
+      });
+    });
   }, []);
 
   const loadRangeByIndices = useCallback(
@@ -310,6 +237,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       const generation = ++loadGenerationRef.current;
       windowLoadingRef.current = true;
       scrollReadyRef.current = false;
+      extendChainRef.current += 1;
 
       if (!options?.preserveScroll) {
         setLoadingWindow(true);
@@ -368,7 +296,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       setSearchResults([]);
       setHighlightMessageId(undefined);
 
-      // Pin timeline + scroll-sync to the clicked day while the jump settles.
       jumpLockUntilRef.current = performance.now() + JUMP_LOCK_MS;
       activeDayRef.current = dayKey;
       lastPreviewDayKeyRef.current = undefined;
@@ -397,6 +324,17 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   }, []);
 
   useEffect(() => {
+    setMessages([]);
+    setActiveDayKey(undefined);
+    setSearchActive(false);
+    setSearchResults([]);
+    setHighlightMessageId(undefined);
+    setLoadingWindow(true);
+    windowRangeRef.current = { start: 0, end: 0 };
+    scrollReadyRef.current = false;
+    pendingScrollRef.current = null;
+    activeDayRef.current = undefined;
+    lastPreviewDayKeyRef.current = undefined;
     hasInitializedRef.current = false;
   }, [chatIndex.slug]);
 
@@ -410,7 +348,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     void loadRangeByIndices(startIndex, lastIndex, {
       scrollTarget: { dayKey: chatIndex.days[lastIndex]?.key, align: "end" },
     });
-    // Only once per chat — must not re-fire when loadRangeByIndices identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatIndex.slug, chatIndex.days]);
 
@@ -449,56 +386,17 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   }, [chatIndex.slug, searchQuery]);
 
   useLayoutEffect(() => {
-    if (!pendingScrollRef.current || rows.length === 0) return;
-
-    const target = pendingScrollRef.current;
-    pendingScrollRef.current = null;
-    const container = scrollRef.current;
-
-    const scrollToTarget = () => {
-      if (target.align === "end" && !target.messageId && !target.dayKey) {
-        rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
-        return true;
-      }
-
-      const rowIndex = target.messageId
-        ? findRowIndexForMessage(rows, target.messageId)
-        : target.dayKey
-          ? findRowIndexForDay(rows, target.dayKey)
-          : -1;
-
-      if (rowIndex >= 0) {
-        rowVirtualizer.scrollToIndex(rowIndex, {
-          align: target.messageId ? "center" : (target.align ?? "start"),
-          behavior: "auto",
-        });
-        return true;
-      }
-
-      return false;
-    };
-
-    const scrolled = scrollToTarget();
-    if (!scrolled && container && target.dayKey) {
-      // Target day missing from rows — stay put rather than jumping to scrollTop 0
-      // of an unrelated window. Retry once after the virtualizer measures.
-      requestAnimationFrame(() => {
-        if (!scrollToTarget() && container && target.align === "end") {
-          rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
-        }
-      });
-    } else if (!scrolled && container && target.align === "end") {
-      rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
-    } else if (scrolled) {
-      // Re-apply after measure so estimate→actual size shifts don't leave us on the wrong day.
-      requestAnimationFrame(() => {
-        scrollToTarget();
-        requestAnimationFrame(() => scrollToTarget());
-      });
+    if (searchActive) {
+      scrollReadyRef.current = true;
+      return;
     }
-
-    scrollReadyRef.current = true;
-  }, [messages, rowVirtualizer, rows]);
+    if (!pendingScrollRef.current) {
+      if (messages.length > 0) scrollReadyRef.current = true;
+      return;
+    }
+    if (rows.length === 0) return;
+    applyPendingScroll();
+  }, [applyPendingScroll, messages.length, rows.length, searchActive]);
 
   const extendWindowEdge = useCallback(
     async (direction: "prev" | "next"): Promise<boolean> => {
@@ -525,7 +423,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
         try {
           const response = await loadChatMessageRange(chatIndex.slug, fromDay, toDay);
-          // Jump/reload bumped the generation — discard stale extend results.
           if (generation !== loadGenerationRef.current) {
             scrollAnchorRef.current = null;
             return false;
@@ -542,12 +439,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             const prepended = incoming.filter((message) => !knownIds.has(message.id));
             if (prepended.length === 0) return current;
             didPrepend = true;
-            // Only advance the loaded day window when content actually landed.
-            windowRangeRef.current = { start: nextStart, end };
             return [...prepended, ...current];
           });
 
-          if (!didPrepend) scrollAnchorRef.current = null;
+          if (didPrepend) {
+            windowRangeRef.current = { start: nextStart, end };
+          } else {
+            scrollAnchorRef.current = null;
+          }
           return didPrepend;
         } catch (error) {
           console.error("Ältere Nachrichten konnten nicht geladen werden.", error);
@@ -581,10 +480,12 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             const appended = incoming.filter((message) => !knownIds.has(message.id));
             if (appended.length === 0) return current;
             didAppend = true;
-            windowRangeRef.current = { start, end: nextEnd };
             return [...current, ...appended];
           });
 
+          if (didAppend) {
+            windowRangeRef.current = { start, end: nextEnd };
+          }
           return didAppend;
         } catch (error) {
           console.error("Neuere Nachrichten konnten nicht geladen werden.", error);
@@ -599,32 +500,106 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     [chatIndex.days, chatIndex.slug, searchActive],
   );
 
-  const maybeExtendWindow = useCallback(async () => {
-    if (
-      !scrollReadyRef.current ||
-      pendingScrollRef.current ||
-      windowLoadingRef.current ||
-      extendLoadingRef.current ||
-      searchActive
-    ) {
-      return false;
-    }
+  const canExtend = useCallback(
+    (direction: "prev" | "next") => {
+      // Jump-lock only pins the timeline highlight — do not block window extend.
+      if (
+        !scrollReadyRef.current ||
+        pendingScrollRef.current ||
+        windowLoadingRef.current ||
+        extendLoadingRef.current ||
+        searchActive
+      ) {
+        return false;
+      }
 
-    const edges = getScrollEdges();
-    if (!edges) return false;
+      const { start, end } = windowRangeRef.current;
+      if (direction === "prev") return start > 0;
+      return end < chatIndex.days.length - 1;
+    },
+    [chatIndex.days.length, searchActive],
+  );
 
-    const { start, end } = windowRangeRef.current;
+  const runExtendChain = useCallback(
+    async (direction: "prev" | "next") => {
+      const chainId = ++extendChainRef.current;
 
-    if (edges.nearTop && start > 0) {
-      return extendWindowEdge("prev");
-    }
+      while (canExtend(direction)) {
+        if (chainId !== extendChainRef.current) return;
 
-    if (edges.nearBottom && end < chatIndex.days.length - 1) {
-      return extendWindowEdge("next");
-    }
+        const did = await extendWindowEdge(direction);
+        if (!did || chainId !== extendChainRef.current) return;
 
-    return false;
-  }, [chatIndex.days.length, extendWindowEdge, getScrollEdges, searchActive]);
+        // Wait for prepend scroll-anchor layout before deciding whether to load again.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+
+        const container = scrollRef.current;
+        const sentinel =
+          direction === "prev" ? topSentinelRef.current : bottomSentinelRef.current;
+        if (!container || !sentinel) return;
+
+        const rootRect = container.getBoundingClientRect();
+        const rect = sentinel.getBoundingClientRect();
+        const margin = 800;
+        const stillNear =
+          direction === "prev"
+            ? rect.bottom >= rootRect.top - margin
+            : rect.top <= rootRect.bottom + margin;
+
+        if (!stillNear) return;
+      }
+    },
+    [canExtend, extendWindowEdge],
+  );
+
+  // Reliable infinite scroll: observe edge sentinels (not scrollTop math on a virtual list).
+  useEffect(() => {
+    if (searchActive || loadingWindow || rows.length === 0) return;
+
+    const root = scrollRef.current;
+    const top = topSentinelRef.current;
+    const bottom = bottomSentinelRef.current;
+    if (!root || !top || !bottom) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          if (entry.target === top) {
+            void runExtendChain("prev");
+          } else if (entry.target === bottom) {
+            void runExtendChain("next");
+          }
+        }
+      },
+      { root, rootMargin: EXTEND_ROOT_MARGIN, threshold: 0 },
+    );
+
+    observer.observe(top);
+    observer.observe(bottom);
+
+    const kickIfNearEdge = () => {
+      if (!scrollReadyRef.current || pendingScrollRef.current) return;
+      const { start, end } = windowRangeRef.current;
+      if (root.scrollTop < 900 && start > 0) void runExtendChain("prev");
+      const distanceBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      if (distanceBottom < 900 && end < chatIndex.days.length - 1) {
+        void runExtendChain("next");
+      }
+    };
+
+    // IO may not re-fire while a sentinel stays visible; kick after scroll settles.
+    const kickA = window.setTimeout(kickIfNearEdge, 160);
+    const kickB = window.setTimeout(kickIfNearEdge, 800);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(kickA);
+      window.clearTimeout(kickB);
+    };
+  }, [chatIndex.days.length, loadingWindow, rows.length, runExtendChain, searchActive]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -648,7 +623,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     };
 
     const onScroll = () => {
-      // Keep scroll handler tiny — no React setState, no measure, no extend.
       if (!timelineRaf) {
         timelineRaf = requestAnimationFrame(syncTimelineFromScroll);
       }
@@ -665,31 +639,20 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         timelineRaf = 0;
       }
       syncTimelineFromScroll();
-
-      // Safe to reconcile real row heights once momentum has stopped.
-      rowVirtualizer.measure();
-
       if (activeDayRef.current) {
         setActiveDayKey(activeDayRef.current);
       }
-
-      clearTimeout(extendTimerRef.current);
-      extendTimerRef.current = setTimeout(() => {
-        if (performance.now() >= jumpLockUntilRef.current) {
-          void maybeExtendWindow();
-        }
-      }, 80);
     };
 
-    // Fallback for browsers without scrollend (debounce).
-    const onScrollFallback = () => {
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const onScrollWithIdle = () => {
       onScroll();
-      clearTimeout(extendTimerRef.current);
-      extendTimerRef.current = setTimeout(onScrollEnd, SCROLL_IDLE_MS);
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(onScrollEnd, 180);
     };
 
     const supportsScrollEnd = "onscrollend" in container;
-    container.addEventListener("scroll", supportsScrollEnd ? onScroll : onScrollFallback, {
+    container.addEventListener("scroll", supportsScrollEnd ? onScroll : onScrollWithIdle, {
       passive: true,
     });
     if (supportsScrollEnd) {
@@ -697,20 +660,13 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     }
 
     return () => {
-      container.removeEventListener("scroll", supportsScrollEnd ? onScroll : onScrollFallback);
+      container.removeEventListener("scroll", supportsScrollEnd ? onScroll : onScrollWithIdle);
       container.removeEventListener("scrollend", onScrollEnd);
-      clearTimeout(extendTimerRef.current);
+      clearTimeout(idleTimer);
       clearTimeout(overlayHideTimerRef.current);
       if (timelineRaf) cancelAnimationFrame(timelineRaf);
     };
-  }, [
-    maybeExtendWindow,
-    previewTimelineDay,
-    resolveActiveDayFromScroll,
-    rowVirtualizer,
-    scheduleHandleHide,
-    searchActive,
-  ]);
+  }, [previewTimelineDay, resolveActiveDayFromScroll, scheduleHandleHide, searchActive]);
 
   const openMedia = useCallback((items: MediaGalleryItem[], index: number) => {
     setLightbox({ items, index });
@@ -762,15 +718,37 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
               {searchEmpty ? "Keine Nachrichten für diese Suche gefunden." : "Keine Nachrichten in diesem Chat."}
             </div>
           ) : (
-            <VirtualChatRows
-              rowVirtualizer={rowVirtualizer}
-              rows={rows}
-              exportData={exportData}
-              myName={myName}
-              highlightMessageId={highlightMessageId}
-              onOpenMedia={openMedia}
-              onOpenSearchResult={openSearchResult}
-            />
+            <div className="flex w-full flex-col gap-2.5">
+              {!searchActive && (
+                <div
+                  ref={topSentinelRef}
+                  className="h-px w-full shrink-0"
+                  aria-hidden
+                  data-extend-edge="prev"
+                />
+              )}
+
+              {rows.map((row) => (
+                <ChatRow
+                  key={row.id}
+                  row={row}
+                  exportData={exportData}
+                  myName={myName}
+                  highlightMessageId={highlightMessageId}
+                  onOpenMedia={openMedia}
+                  onOpenSearchResult={openSearchResult}
+                />
+              ))}
+
+              {!searchActive && (
+                <div
+                  ref={bottomSentinelRef}
+                  className="h-px w-full shrink-0"
+                  aria-hidden
+                  data-extend-edge="next"
+                />
+              )}
+            </div>
           )}
         </div>
 
@@ -823,18 +801,8 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   );
 }
 
-interface VirtualChatRowsProps {
-  rowVirtualizer: {
-    getTotalSize: () => number;
-    getVirtualItems: () => Array<{
-      index: number;
-      start: number;
-      size: number;
-      end: number;
-    }>;
-    measureElement: (node: Element | null) => void;
-  };
-  rows: VirtualChatRow[];
+interface ChatRowProps {
+  row: VirtualChatRow;
   exportData: WhatsAppExport;
   myName: string;
   highlightMessageId?: string;
@@ -842,100 +810,87 @@ interface VirtualChatRowsProps {
   onOpenSearchResult: (row: Extract<VirtualChatRow, { kind: "search-result" }>) => void;
 }
 
-const VirtualChatRows = function VirtualChatRows({
-  rowVirtualizer,
-  rows,
+function ChatRow({
+  row,
   exportData,
   myName,
   highlightMessageId,
   onOpenMedia,
   onOpenSearchResult,
-}: VirtualChatRowsProps) {
-  const virtualItems = rowVirtualizer.getVirtualItems();
+}: ChatRowProps) {
+  if (row.kind === "day-header") {
+    return (
+      <div
+        className="flex justify-center"
+        data-day-key={row.dayKey}
+        data-day-header={row.dayKey}
+      >
+        <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[var(--wa-muted)] shadow-sm">
+          {row.label}
+        </span>
+      </div>
+    );
+  }
+
+  if (row.kind === "search-result") {
+    return (
+      <button
+        type="button"
+        onClick={() => void onOpenSearchResult(row)}
+        className="w-full rounded-2xl bg-white/90 px-4 py-3 text-left shadow-sm transition hover:bg-white"
+        data-day-key={row.dayKey}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-[var(--wa-accent)]">{row.sender}</span>
+          <span className="text-[11px] text-[var(--wa-muted)]">
+            {new Intl.DateTimeFormat("de-DE", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(row.date)}
+          </span>
+        </div>
+        <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-[var(--wa-text)]">
+          {row.text || row.attachment || "Medien"}
+        </p>
+      </button>
+    );
+  }
+
+  if (row.item.kind === "media-group") {
+    return (
+      <div data-day-key={row.dayKey} data-message-id={row.id}>
+        <MediaGroupBubble
+          sender={row.item.sender}
+          date={row.item.date}
+          caption={row.item.caption}
+          items={row.item.items}
+          exportData={exportData}
+          isOutgoing={row.item.sender === myName}
+          onOpenMedia={onOpenMedia}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
-      className="relative w-full"
-      style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      data-day-key={row.dayKey}
+      data-message-id={row.item.message.id}
+      className={
+        highlightMessageId === row.item.message.id
+          ? "rounded-2xl ring-2 ring-[var(--wa-accent)]/40"
+          : undefined
+      }
     >
-      {virtualItems.map((virtualRow) => {
-        const row = rows[virtualRow.index];
-        if (!row) return null;
-
-        return (
-          <div
-            key={row.id}
-            ref={rowVirtualizer.measureElement}
-            data-index={virtualRow.index}
-            className="virtual-chat-row absolute left-0 top-0 w-full"
-            style={{
-              // Transform keeps scrolling on the compositor; avoid layout during wheel.
-              transform: `translate3d(0, ${virtualRow.start}px, 0)`,
-              paddingBottom: ROW_GAP_PX,
-            }}
-          >
-            {row.kind === "day-header" && (
-              <div className="flex justify-center pb-1">
-                <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[var(--wa-muted)] shadow-sm">
-                  {row.label}
-                </span>
-              </div>
-            )}
-
-            {row.kind === "display-item" &&
-              (row.item.kind === "media-group" ? (
-                <MediaGroupBubble
-                  sender={row.item.sender}
-                  date={row.item.date}
-                  caption={row.item.caption}
-                  items={row.item.items}
-                  exportData={exportData}
-                  isOutgoing={row.item.sender === myName}
-                  onOpenMedia={onOpenMedia}
-                />
-              ) : (
-                <div
-                  className={
-                    highlightMessageId === row.item.message.id
-                      ? "rounded-2xl ring-2 ring-[var(--wa-accent)]/40"
-                      : undefined
-                  }
-                >
-                  <MessageBubble
-                    message={row.item.message}
-                    exportData={exportData}
-                    isOutgoing={row.item.message.sender === myName}
-                    onOpenMedia={onOpenMedia}
-                  />
-                </div>
-              ))}
-
-            {row.kind === "search-result" && (
-              <button
-                type="button"
-                onClick={() => void onOpenSearchResult(row)}
-                className="w-full rounded-2xl bg-white/90 px-4 py-3 text-left shadow-sm transition hover:bg-white"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-[var(--wa-accent)]">{row.sender}</span>
-                  <span className="text-[11px] text-[var(--wa-muted)]">
-                    {new Intl.DateTimeFormat("de-DE", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    }).format(row.date)}
-                  </span>
-                </div>
-                <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-[var(--wa-text)]">
-                  {row.text || row.attachment || "Medien"}
-                </p>
-              </button>
-            )}
-          </div>
-        );
-      })}
+      <MessageBubble
+        message={row.item.message}
+        exportData={exportData}
+        isOutgoing={row.item.message.sender === myName}
+        onOpenMedia={onOpenMedia}
+      />
     </div>
   );
-};
+}
