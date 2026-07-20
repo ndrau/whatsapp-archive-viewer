@@ -204,11 +204,12 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     getScrollElement: () => scrollRef.current,
     // Gap is padding inside each row — include it in the estimate too.
     estimateSize: (index) => estimateRowSize(rows[index]) + ROW_GAP_PX,
-    overscan: 12,
+    overscan: 10,
     gap: 0,
     getItemKey: (index) => rows[index]?.id ?? index,
     useScrollendEvent: true,
-    isScrollingResetDelay: 150,
+    isScrollingResetDelay: 200,
+    useAnimationFrameWithResizeObserver: true,
     measureElement: (element, _entry, instance) => {
       const measured = Math.round((element as HTMLElement).offsetHeight);
       if (!Number.isFinite(measured) || measured <= 0) {
@@ -227,11 +228,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     scrollAnchorRef.current = null;
     container.scrollTop = anchor.top + (container.scrollHeight - anchor.height);
   }, [messages]);
-
-  // Remeasure after row set changes so padding-bottom gaps stay exact.
-  useLayoutEffect(() => {
-    rowVirtualizer.measure();
-  }, [rows, rowVirtualizer]);
 
   const previewTimelineDay = useCallback(
     (dayKey?: string) => {
@@ -652,8 +648,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           setActiveDayKey(activeDayRef.current);
         }
 
-        rowVirtualizer.measure();
-
         if (performance.now() >= jumpLockUntilRef.current) {
           void maybeExtendWindow();
         }
@@ -793,6 +787,7 @@ interface VirtualChatRowsProps {
       index: number;
       start: number;
       size: number;
+      end: number;
     }>;
     measureElement: (node: Element | null) => void;
   };
@@ -814,9 +809,16 @@ const VirtualChatRows = function VirtualChatRows({
   onOpenSearchResult,
 }: VirtualChatRowsProps) {
   const virtualItems = rowVirtualizer.getVirtualItems();
+  // Flow layout (not absolute translate): visible bubbles always stack with the
+  // same padding-bottom gap, so estimate drift cannot create overlaps/holes.
+  const paddingTop = virtualItems[0]?.start ?? 0;
+  const lastItem = virtualItems.at(-1);
+  const paddingBottom = lastItem
+    ? Math.max(0, rowVirtualizer.getTotalSize() - lastItem.end)
+    : 0;
 
   return (
-    <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+    <div className="w-full" style={{ paddingTop, paddingBottom }}>
       {virtualItems.map((virtualRow) => {
         const row = rows[virtualRow.index];
         if (!row) return null;
@@ -826,11 +828,8 @@ const VirtualChatRows = function VirtualChatRows({
             key={row.id}
             ref={rowVirtualizer.measureElement}
             data-index={virtualRow.index}
-            className="virtual-chat-row absolute left-0 top-0 w-full"
-            style={{
-              transform: `translate3d(0, ${virtualRow.start}px, 0)`,
-              paddingBottom: ROW_GAP_PX,
-            }}
+            className="virtual-chat-row w-full"
+            style={{ paddingBottom: ROW_GAP_PX }}
           >
             {row.kind === "day-header" && (
               <div className="flex justify-center pb-1">

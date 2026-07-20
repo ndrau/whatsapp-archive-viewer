@@ -451,11 +451,20 @@ function dedupePreviewHdHalvesInRuns(
     const half = run.length / 2;
     const first = run.slice(0, half);
     const second = run.slice(half);
+
+    // Only pair preview/HD halves when both sides are the same media kinds in order
+    // (photo+photo vs video+video must not be treated as one HD upgrade).
+    const kindsMatch = first.every(
+      (message, index) => message.attachment?.kind === second[index]?.attachment?.kind,
+    );
+
     const firstBytes = first.map((message) => getMediaBytes(message.attachment!.filename) ?? 0);
     const secondBytes = second.map((message) => getMediaBytes(message.attachment!.filename) ?? 0);
 
     const complete =
-      firstBytes.every((value) => value > 0) && secondBytes.every((value) => value > 0);
+      kindsMatch &&
+      firstBytes.every((value) => value > 0) &&
+      secondBytes.every((value) => value > 0);
     const firstTotal = firstBytes.reduce((sum, value) => sum + value, 0);
     const secondTotal = secondBytes.reduce((sum, value) => sum + value, 0);
     const maxFirst = Math.max(...firstBytes);
@@ -545,6 +554,50 @@ function reindexMessages(messages: ChatMessage[]): ChatMessage[] {
   }));
 }
 
+/**
+ * Same image/video exported twice back-to-back (preview + HD, or re-encode).
+ * Applies to videos as well as photos — keep the heavier file.
+ */
+function dedupeConsecutiveSimilarMedia(
+  messages: ChatMessage[],
+  getMediaBytes?: MediaBytesLookup,
+): ChatMessage[] {
+  if (!getMediaBytes) return messages;
+
+  const result: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const previous = result.at(-1);
+    if (
+      previous &&
+      previous.sender === message.sender &&
+      isGroupableMediaMessage(previous) &&
+      isGroupableMediaMessage(message) &&
+      previous.attachment!.kind === message.attachment!.kind &&
+      timeDeltaMs(previous, message) <= 12_000
+    ) {
+      const previousBytes = getMediaBytes(previous.attachment!.filename) ?? 0;
+      const nextBytes = getMediaBytes(message.attachment!.filename) ?? 0;
+      if (previousBytes > 0 && nextBytes > 0) {
+        const heavier = Math.max(previousBytes, nextBytes);
+        const lighter = Math.min(previousBytes, nextBytes);
+        const minRatio = message.attachment!.kind === "video" ? 1.15 : 1.25;
+
+        if (heavier >= lighter * minRatio) {
+          if (nextBytes >= previousBytes) {
+            result[result.length - 1] = message;
+          }
+          continue;
+        }
+      }
+    }
+
+    result.push(message);
+  }
+
+  return result;
+}
+
 export function consolidateMessages(
   messages: ChatMessage[],
   options: ParseWhatsAppOptions = {},
@@ -560,7 +613,11 @@ export function consolidateMessages(
     withoutPreviewHalves,
     options.getMediaBytes,
   );
-  const normalized = stripDuplicateCaptions(withoutDuplicateAlbums);
+  const withoutSimilarMedia = dedupeConsecutiveSimilarMedia(
+    withoutDuplicateAlbums,
+    options.getMediaBytes,
+  );
+  const normalized = stripDuplicateCaptions(withoutSimilarMedia);
   return reindexMessages(normalized);
 }
 

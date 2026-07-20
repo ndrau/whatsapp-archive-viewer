@@ -76,11 +76,11 @@ export function ArchiveApp() {
       <div className="min-h-screen bg-[var(--wa-page-bg)]">
         <div className="mx-auto flex min-h-screen max-w-4xl flex-col px-4 py-8 sm:px-6">
           <header className="mb-8 rounded-[28px] bg-[var(--wa-accent)] px-6 py-8 text-white shadow-xl">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archive Viewer</p>
-            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Gespeicherte Chats ansehen</h1>
+            <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archiv</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Deine Chats wieder lesen</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85 sm:text-base">
-              Chats werden über <code>pnpm run build:chats</code> aus dem Ordner{" "}
-              <code>chats/</code> vorbereitet und hier nur noch angezeigt.
+              Hier kannst du gespeicherte WhatsApp-Chats ganz einfach durchscrollen — mit Fotos,
+              Videos und Sprachnachrichten, so wie damals.
             </p>
           </header>
 
@@ -138,14 +138,14 @@ export function ArchiveApp() {
                     setError(
                       exportError instanceof Error
                         ? exportError.message
-                        : "HTML-Export fehlgeschlagen.",
+                        : "Speichern als Datei ist fehlgeschlagen.",
                     );
                   } finally {
                     setExporting(false);
                   }
                 }}
               >
-                {exporting ? "Export…" : "HTML-Archiv"}
+                {exporting ? "Wird gespeichert…" : "Als Datei speichern"}
               </button>
             </div>
           </div>
@@ -154,7 +154,9 @@ export function ArchiveApp() {
         <section className="mb-3 shrink-0 rounded-2xl bg-white/90 p-3 shadow-sm sm:p-4">
           <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">Dein Name</span>
+              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">
+                Wer bist du in diesem Chat?
+              </span>
               <select
                 value={myName}
                 onChange={(event) => setMyName(event.target.value)}
@@ -173,7 +175,7 @@ export function ArchiveApp() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Nach Text, Namen oder Dateinamen suchen…"
+                placeholder="Nachricht oder Name suchen…"
                 className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
               />
             </label>

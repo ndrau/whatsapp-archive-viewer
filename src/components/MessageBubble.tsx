@@ -66,12 +66,12 @@ function MediaAttachment({
 
   if (attachment.kind === "image" || attachment.kind === "sticker") {
     return (
-      <button type="button" onClick={openMedia} className="mb-2 block max-w-full text-left">
+      <button type="button" onClick={openMedia} className="mb-2 block w-full max-w-full text-left">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={mediaUrl}
           alt={attachment.filename}
-          className="h-64 max-w-full rounded-xl bg-black/5 object-cover"
+          className="h-64 w-full max-w-full rounded-xl bg-black/5 object-cover"
           loading="lazy"
         />
       </button>
@@ -80,14 +80,18 @@ function MediaAttachment({
 
   if (attachment.kind === "video") {
     return (
-      <button type="button" onClick={openMedia} className="relative mb-2 block max-w-full text-left">
+      <button
+        type="button"
+        onClick={openMedia}
+        className="relative mb-2 block w-full max-w-full text-left"
+      >
         <video
           preload="metadata"
           src={mediaUrl}
-          className="h-64 max-w-full rounded-xl bg-black/5 object-cover"
+          className="h-64 w-full max-w-full rounded-xl bg-black/5 object-cover"
         />
         <span className="absolute bottom-3 left-3 rounded bg-black/60 px-2 py-1 text-xs text-white">
-          Video öffnen
+          Video
         </span>
       </button>
     );

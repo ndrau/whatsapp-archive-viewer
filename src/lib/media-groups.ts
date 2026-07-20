@@ -18,6 +18,7 @@ export type ChatDisplayItem =
     };
 
 const ALBUM_WINDOW_MS = 30_000;
+const TRAILING_CAPTION_WINDOW_MS = 8_000;
 
 function hasGroupableMedia(message: ChatMessage): boolean {
   const attachment = message.attachment;
@@ -43,6 +44,10 @@ function collectAlbumCaption(groupMessages: ChatMessage[]): string | undefined {
   return undefined;
 }
 
+function isTextOnly(message: ChatMessage): boolean {
+  return Boolean(message.text.trim()) && !message.attachment;
+}
+
 export function buildDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
   const items: ChatDisplayItem[] = [];
   let index = 0;
@@ -59,13 +64,27 @@ export function buildDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
         cursor += 1;
       }
 
-      if (groupMessages.length > 1) {
+      // Caption often follows the last attachment as its own line ("Nur geil maus").
+      let trailingCaption: string | undefined;
+      const trailing = messages[cursor];
+      if (
+        trailing &&
+        trailing.sender === message.sender &&
+        isTextOnly(trailing) &&
+        Math.abs(trailing.date.getTime() - groupMessages.at(-1)!.date.getTime()) <=
+          TRAILING_CAPTION_WINDOW_MS
+      ) {
+        trailingCaption = trailing.text.trim();
+        cursor += 1;
+      }
+
+      if (groupMessages.length > 1 || trailingCaption) {
         items.push({
           kind: "media-group",
           id: groupMessages.map((entry) => entry.id).join("-"),
           sender: message.sender,
           date: groupMessages.at(-1)!.date,
-          caption: collectAlbumCaption(groupMessages),
+          caption: collectAlbumCaption(groupMessages) ?? trailingCaption,
           messages: groupMessages,
           items: groupMessages
             .filter(

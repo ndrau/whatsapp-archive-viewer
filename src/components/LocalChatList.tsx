@@ -33,7 +33,7 @@ export function LocalChatList({
         setChats(nextChats);
       } catch {
         setChats([]);
-        onError("Kein Chat-Build gefunden. Bitte pnpm run build:chats ausführen.");
+        onError("Es wurden noch keine Chats gefunden. Bitte zuerst die Chat-Daten vorbereiten.");
       } finally {
         setLoadingList(false);
       }
@@ -45,7 +45,7 @@ export function LocalChatList({
   if (loadingList) {
     return (
       <section className="rounded-3xl border border-black/10 bg-white/80 p-6">
-        <p className="text-sm text-[var(--wa-muted)]">Verfügbare Chats werden geladen…</p>
+        <p className="text-sm text-[var(--wa-muted)]">Chats werden geladen…</p>
       </section>
     );
   }
@@ -54,7 +54,8 @@ export function LocalChatList({
     return (
       <section className="rounded-3xl border border-black/10 bg-white/80 p-6">
         <p className="text-sm text-[var(--wa-muted)]">
-          Noch kein Chat-Build vorhanden. Bitte <code>pnpm run build:chats</code> ausführen.
+          Noch keine Chats vorhanden. Sobald WhatsApp-Exporte vorbereitet wurden, erscheinen sie
+          hier.
         </p>
       </section>
     );
@@ -64,9 +65,12 @@ export function LocalChatList({
     <section className="rounded-3xl border border-black/10 bg-white/80 p-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--wa-accent)]">
-          Verfügbare Chats
+          Deine Chats
         </p>
-        <h2 className="mt-2 text-2xl font-semibold text-[var(--wa-text)]">Aus .built/chats/</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--wa-text)]">Zum Öffnen antippen</h2>
+        <p className="mt-1 text-sm text-[var(--wa-muted)]">
+          Wähle einen Chat aus, um die Nachrichten chronologisch anzusehen.
+        </p>
       </div>
 
       <div className="mt-5 grid gap-3">
@@ -78,7 +82,7 @@ export function LocalChatList({
             onClick={() => {
               onLoadingChange(true);
               onError("");
-              void Promise.resolve(onChatSelected(chat.slug, `chats/${chat.slug}`)).finally(() =>
+              void Promise.resolve(onChatSelected(chat.slug, chat.title)).finally(() =>
                 onLoadingChange(false),
               );
             }}
@@ -86,12 +90,14 @@ export function LocalChatList({
             <div>
               <p className="font-semibold text-[var(--wa-text)]">{chat.title}</p>
               <p className="mt-1 text-sm text-[var(--wa-muted)]">
-                {chat.messageCount.toLocaleString("de-DE")} Nachrichten ·{" "}
-                {chat.mediaCount.toLocaleString("de-DE")} Medien
+                {chat.messageCount.toLocaleString("de-DE")} Nachrichten
+                {chat.mediaCount > 0
+                  ? ` · ${chat.mediaCount.toLocaleString("de-DE")} Fotos & Videos`
+                  : ""}
               </p>
             </div>
             <span className="rounded-full bg-[var(--wa-accent-soft)] px-3 py-1 text-xs font-medium text-[var(--wa-accent-dark)]">
-              {chat.slug}
+              Öffnen
             </span>
           </button>
         ))}
