@@ -17,7 +17,7 @@ import {
   dataRatioToCssPercent,
   findTimelineDayAtTrackRatio,
   formatTimelineDay,
-  trackRatioToCssPercent,
+  scrubTrackRatioToCssPercent,
 } from "@/lib/chat-timeline";
 
 export interface MobileTimelineScrubberHandle {
@@ -155,8 +155,8 @@ export const MobileTimelineScrubber = memo(
 
           setScrubDay(day);
           setDisplayYear(day.date.getFullYear());
-          // Pointer Y is already track-space — do not re-apply edge padding.
-          setHandleTop(`${trackRatioToCssPercent(pointerTrackRatio(clientY, track))}%`);
+          // Follow pointer, but stop at the padding edges.
+          setHandleTop(`${scrubTrackRatioToCssPercent(pointerTrackRatio(clientY, track))}%`);
           onPreviewDay?.(day);
         },
         [onPreviewDay, resolveDayFromPointer],

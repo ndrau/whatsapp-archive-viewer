@@ -19,7 +19,7 @@ import {
   findTimelineDayAtRatio,
   findTimelineDayAtTrackRatio,
   formatTimelineDay,
-  trackRatioToCssPercent,
+  scrubTrackRatioToCssPercent,
 } from "@/lib/chat-timeline";
 
 export interface ChatTimelineHandle {
@@ -58,10 +58,12 @@ function applyMarkerPosition(
 ) {
   if (!day) return;
 
+  // During scrub/hover, follow the pointer but stop at the padding edges —
+  // never draw the marker into the top/bottom inset.
   const top =
     trackRatio === undefined
       ? dayTopPercent(day)
-      : `${trackRatioToCssPercent(trackRatio)}%`;
+      : `${scrubTrackRatioToCssPercent(trackRatio)}%`;
 
   if (line) line.style.top = top;
   if (dot) dot.style.top = top;
@@ -208,7 +210,7 @@ export const ChatTimeline = memo(
         const day = edge === "start" ? model.days[0] : model.days.at(-1);
         if (!day) return;
 
-        const trackRatio = edge === "start" ? 0 : 1;
+        const trackRatio = edge === "start" ? TIMELINE_EDGE_PADDING : 1 - TIMELINE_EDGE_PADDING;
         lastTrackRatioRef.current = trackRatio;
         edgePinnedRef.current = true;
         pendingJumpKeyRef.current = undefined;

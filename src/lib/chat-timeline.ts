@@ -149,6 +149,21 @@ export function trackRatioToCssPercent(trackRatio: number): number {
   return Math.min(1, Math.max(0, trackRatio)) * 100;
 }
 
+/**
+ * Keep the scrub marker inside the content band (between edge paddings).
+ * The mouse may enter the padding; the marker must stop at the padding edge.
+ */
+export function clampTrackRatioToContent(trackRatio: number): number {
+  const min = TIMELINE_EDGE_PADDING;
+  const max = 1 - TIMELINE_EDGE_PADDING;
+  return Math.min(max, Math.max(min, Math.min(1, Math.max(0, trackRatio))));
+}
+
+/** CSS % for scrubbing: follows the pointer, but stops at the padding edges. */
+export function scrubTrackRatioToCssPercent(trackRatio: number): number {
+  return clampTrackRatioToContent(trackRatio) * 100;
+}
+
 export function dataRatioToCssPercent(ratio: number): number {
   return dataRatioToTrackRatio(ratio) * 100;
 }
