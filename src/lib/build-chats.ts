@@ -32,6 +32,35 @@ const SOURCE_IGNORED_FILES = new Set([
 export interface ChatMeta {
   title?: string;
   defaultMyName?: string;
+  /**
+   * Map alternate sender labels onto a canonical name.
+   * Useful when Instagram-imported lines use nicknames (e.g. "Denise ♡")
+   * while the WhatsApp export uses the real name ("Denise Rau").
+   */
+  senderAliases?: Record<string, string>;
+}
+
+function applySenderAliases(
+  messages: BuiltMessageRecord[],
+  participants: string[],
+  aliases?: Record<string, string>,
+): { messages: BuiltMessageRecord[]; participants: string[] } {
+  if (!aliases || Object.keys(aliases).length === 0) {
+    return { messages, participants };
+  }
+
+  const mapSender = (sender: string) => aliases[sender] ?? sender;
+
+  const nextMessages = messages.map((message) => {
+    const sender = mapSender(message.sender);
+    return sender === message.sender ? message : { ...message, sender };
+  });
+
+  const nextParticipants = [...new Set(participants.map(mapSender))].sort((left, right) =>
+    left.localeCompare(right, "de"),
+  );
+
+  return { messages: nextMessages, participants: nextParticipants };
 }
 
 function isSourceChatDirectory(name: string): boolean {
@@ -155,7 +184,13 @@ export async function buildChat(slug: string): Promise<BuiltChatIndex> {
   const parsed = parseWhatsAppChat(text, SOURCE_FILE, { getMediaBytes });
   const builtAt = new Date().toISOString();
   const title = meta.title ?? parsed.chatTitle ?? titleFromSlug(slug);
-  const messages = parsed.messages.map(serializeMessage);
+  const aliased = applySenderAliases(
+    parsed.messages.map(serializeMessage),
+    parsed.participants,
+    meta.senderAliases,
+  );
+  const messages = aliased.messages;
+  const participants = aliased.participants;
   const days = buildDayIndex(messages);
 
   const chunkMap = new Map<string, BuiltMessageRecord[]>();
@@ -200,7 +235,7 @@ export async function buildChat(slug: string): Promise<BuiltChatIndex> {
     builtAt,
     sourceFile: SOURCE_FILE,
     sourceDir: `chats/${slug}`,
-    participants: parsed.participants,
+    participants,
     defaultMyName: meta.defaultMyName,
     mediaFiles,
     messageCount: messages.length,

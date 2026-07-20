@@ -63,7 +63,7 @@ export function ArchiveApp() {
       setChatIndex(index);
       setSourceLabel(label);
       setSearchQuery("");
-      setMyName((current) => current || index.defaultMyName || index.participants[0] || "");
+      setMyName(index.defaultMyName || index.participants[0] || "");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Chat konnte nicht geladen werden.");
     } finally {
