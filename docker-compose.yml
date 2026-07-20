@@ -25,6 +25,12 @@ services:
       # 1 = beim Start chats/ neu parsen (empfohlen nach Export-Update)
       # 0 = vorhandenes .built Volume nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"
+      # Login: gemeinsames Archiv-Passwort + Secret zum Signieren der Session (mind. 32 Zeichen).
+      # Session-Cookie gilt bis Mitternacht Europe/Berlin.
+      # Beispiel-Secret erzeugen: openssl rand -base64 32
+      ARCHIVE_PASSWORD: "CHANGE_ME"
+      AUTH_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARS"
+      # Lokal ohne Login: ARCHIVE_AUTH_DISABLED: "1"
     volumes:
       # Rohdaten — bleiben bei Image-Updates erhalten (read-only reicht)
       - /mnt/tank/apps/whatsapp-archive/chats:/app/chats:ro

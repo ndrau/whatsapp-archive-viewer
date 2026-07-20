@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ChatViewer } from "@/components/ChatViewer";
 import { LocalChatList } from "@/components/LocalChatList";
+import { LogoutButton } from "@/components/LogoutButton";
 import { downloadHtmlArchive } from "@/lib/export-html";
 import { getMediaKind, isVoiceMessage } from "@/lib/media-types";
 import {
@@ -76,12 +77,17 @@ export function ArchiveApp() {
       <div className="min-h-screen bg-[var(--wa-page-bg)]">
         <div className="mx-auto flex min-h-screen max-w-4xl flex-col px-4 py-8 sm:px-6">
           <header className="mb-8 rounded-[28px] bg-[var(--wa-accent)] px-6 py-8 text-white shadow-xl">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archiv</p>
-            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Deine Chats wieder lesen</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85 sm:text-base">
-              Hier kannst du gespeicherte WhatsApp-Chats ganz einfach durchscrollen — mit Fotos,
-              Videos und Sprachnachrichten, so wie damals.
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archiv</p>
+                <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Deine Chats wieder lesen</h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85 sm:text-base">
+                  Hier kannst du gespeicherte WhatsApp-Chats ganz einfach durchscrollen — mit Fotos,
+                  Videos und Sprachnachrichten, so wie damals.
+                </p>
+              </div>
+              <LogoutButton variant="light" />
+            </div>
           </header>
 
           <LocalChatList
@@ -147,6 +153,7 @@ export function ArchiveApp() {
               >
                 {exporting ? "Wird gespeichert…" : "Als Datei speichern"}
               </button>
+              <LogoutButton variant="light" />
             </div>
           </div>
         </header>
