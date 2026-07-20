@@ -28,6 +28,7 @@ import {
   type ChatIndexResponse,
 } from "@/lib/load-local-chat";
 import type { MediaGalleryItem } from "@/lib/media-groups";
+import { isVoiceMessage } from "@/lib/media-types";
 import type { ChatMessage, WhatsAppExport } from "@/types/whatsapp";
 
 interface ChatViewerProps {
@@ -43,11 +44,14 @@ type PendingScroll = {
   align?: "start" | "center" | "end";
 };
 
-const SIZE_BUFFER = 8;
-const ROW_GAP_PX = 16;
-/** Bubble text is narrower than full chat width — prefer over-estimate over overlap. */
+const SIZE_BUFFER = 6;
+/** Uniform visual gap between every chat row (virtualizer `gap`). */
+const ROW_GAP_PX = 10;
 const TEXT_LINE_HEIGHT = 22;
-const TEXT_CHARS_PER_LINE = 34;
+/** ~bubble content width; slight over-estimate is OK, sticky oversize is not. */
+const TEXT_CHARS_PER_LINE = 40;
+/** Outgoing voice bubble is compact (no sender line / no extra footer). */
+const VOICE_ROW_HEIGHT = 64;
 const SCROLL_IDLE_MS = 220;
 const EXTEND_EDGE_PX = 480;
 const HANDLE_HIDE_MS = 1800;
@@ -153,6 +157,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
         }
         if (attachment?.kind === "audio") {
+          // VoiceMessagePlayer includes its own timestamp; MessageBubble skips the footer.
+          if (attachment.filename && isVoiceMessage(attachment.filename) && !message.text.trim()) {
+            return header + VOICE_ROW_HEIGHT + SIZE_BUFFER;
+          }
           return header + 88 + footer + bubble + SIZE_BUFFER;
         }
 
@@ -199,9 +207,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     gap: ROW_GAP_PX,
     getItemKey: (index) => rows[index]?.id ?? index,
     useScrollendEvent: true,
-    isScrollingResetDelay: 180,
-    // During scroll / prepend: avoid shrink-driven scroll jumps, but never report a
-    // size smaller than the real DOM height — that caused bubbles to overlap.
+    isScrollingResetDelay: 150,
+    // Always prefer the real DOM height. Sticky Math.max(estimate, measured) left
+    // oversized slots (uneven gaps) after voice/text rows. Only during prepend
+    // settle do we avoid shrinking below the current cache for a few frames.
     measureElement: (element, _entry, instance) => {
       const measured = Math.round((element as HTMLElement).offsetHeight);
       if (!Number.isFinite(measured) || measured <= 0) {
@@ -209,11 +218,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         return instance.options.estimateSize(index);
       }
 
-      if (instance.isScrolling || freezeRowMeasureRef.current) {
+      if (freezeRowMeasureRef.current) {
         const index = instance.indexFromElement(element);
         const key = instance.options.getItemKey(index);
-        const cached = instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
-        return Math.max(cached, measured);
+        const cached = instance.itemSizeCache.get(key);
+        if (cached !== undefined) return Math.max(cached, measured);
       }
 
       return measured;

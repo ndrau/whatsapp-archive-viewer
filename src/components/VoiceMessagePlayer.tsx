@@ -193,7 +193,7 @@ export function VoiceMessagePlayer({
             }}
             className="relative h-7 min-w-0 cursor-pointer"
           >
-            <div className="absolute inset-x-0 bottom-1 flex h-5 items-end gap-[2px]">
+            <div className="absolute inset-x-0 bottom-0 flex h-5 items-end gap-[2px]">
               {waveform.map((peak, index) => {
                 const barProgress = (index + 0.5) / waveform.length;
                 const played = barProgress <= progress;
@@ -210,9 +210,9 @@ export function VoiceMessagePlayer({
               })}
             </div>
 
-            {/* Sit on the waveform baseline (not vertically centered in the bars). */}
+            {/* Thumb rests on the bar baseline (bottom of the waveform). */}
             <span
-              className="pointer-events-none absolute bottom-1 z-10 h-2.5 w-2.5 translate-y-1/2 rounded-full bg-[#111b21] shadow-sm"
+              className="pointer-events-none absolute bottom-0 z-10 h-2.5 w-2.5 translate-y-[3px] rounded-full bg-[#111b21] shadow-sm"
               style={{ left: `calc(${progress * 100}% - 5px)` }}
             />
           </div>
