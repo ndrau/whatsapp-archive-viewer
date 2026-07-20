@@ -51,13 +51,22 @@ export async function fetchLocalChatList() {
   return data.chats;
 }
 
-export async function fetchAppConfig(): Promise<{ allowChatUpload: boolean }> {
+export async function fetchAppConfig(): Promise<{
+  allowChatUpload: boolean;
+  allowChatDelete: boolean;
+}> {
   const response = await fetch("/api/config");
   if (!response.ok) {
-    return { allowChatUpload: false };
+    return { allowChatUpload: false, allowChatDelete: false };
   }
-  const data = (await response.json()) as { allowChatUpload?: boolean };
-  return { allowChatUpload: Boolean(data.allowChatUpload) };
+  const data = (await response.json()) as {
+    allowChatUpload?: boolean;
+    allowChatDelete?: boolean;
+  };
+  return {
+    allowChatUpload: Boolean(data.allowChatUpload),
+    allowChatDelete: Boolean(data.allowChatDelete),
+  };
 }
 
 export async function deleteLocalChat(slug: string): Promise<void> {

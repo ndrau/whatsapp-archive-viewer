@@ -8,6 +8,7 @@ import { LogoutButton } from "@/components/LogoutButton";
 import { getMediaKind, isVoiceMessage } from "@/lib/media-types";
 import {
   deleteLocalChat,
+  fetchAppConfig,
   loadChatIndex,
   toWhatsAppExport,
   type ChatIndexResponse,
@@ -22,6 +23,7 @@ export function ArchiveApp() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [allowChatDelete, setAllowChatDelete] = useState(false);
   const [mobileFullscreen, setMobileFullscreen] = useState(false);
 
   const exportData = useMemo<WhatsAppExport | null>(() => {
@@ -77,6 +79,12 @@ export function ArchiveApp() {
     return () => media.removeEventListener("change", onChange);
   }, []);
 
+  useEffect(() => {
+    void fetchAppConfig()
+      .then((config) => setAllowChatDelete(config.allowChatDelete))
+      .catch(() => setAllowChatDelete(false));
+  }, []);
+
   async function handleChatSelected(slug: string, label: string) {
     setLoading(true);
     setError("");
@@ -95,7 +103,7 @@ export function ArchiveApp() {
   }
 
   async function handleDeleteOpenChat() {
-    if (!chatIndex) return;
+    if (!chatIndex || !allowChatDelete) return;
 
     const title = chatIndex.chatTitle || sourceLabel || chatIndex.slug;
     const confirmed = window.confirm(
@@ -213,14 +221,16 @@ export function ArchiveApp() {
                   >
                     Zurück
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-red-200/80 bg-red-500/20 px-3 py-1.5 text-sm font-medium text-white"
-                    disabled={deleting}
-                    onClick={() => void handleDeleteOpenChat()}
-                  >
-                    {deleting ? "Lösche…" : "Löschen"}
-                  </button>
+                  {allowChatDelete && (
+                    <button
+                      type="button"
+                      className="rounded-full border border-red-200/80 bg-red-500/20 px-3 py-1.5 text-sm font-medium text-white"
+                      disabled={deleting}
+                      onClick={() => void handleDeleteOpenChat()}
+                    >
+                      {deleting ? "Lösche…" : "Löschen"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--wa-accent)] md:hidden"

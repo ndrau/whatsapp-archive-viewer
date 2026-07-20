@@ -37,6 +37,8 @@ services:
       MAX_UPLOAD_BYTES: "8589934592"
       # true = ZIP-Upload in der UI erlaubt; später auf false stellen zum Abschalten
       ALLOW_CHAT_UPLOAD: "true"
+      # true = Chat-Löschen in der UI erlaubt (sonst API + Buttons aus)
+      ALLOW_CHAT_DELETE: "true"
     volumes:
       # Dataset data — WhatsApp-Exporte / UI-Uploads
       - /mnt/tank/apps/whatsapp-archive/data:/app/chats

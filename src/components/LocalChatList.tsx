@@ -31,6 +31,7 @@ export function LocalChatList({
   const [loadingList, setLoadingList] = useState(true);
   const [successMessage, setSuccessMessage] = useState("");
   const [allowChatUpload, setAllowChatUpload] = useState(false);
+  const [allowChatDelete, setAllowChatDelete] = useState(false);
   const [listError, setListError] = useState("");
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
 
@@ -41,9 +42,11 @@ export function LocalChatList({
       const [nextChats, config] = await Promise.all([fetchLocalChatList(), fetchAppConfig()]);
       setChats(nextChats);
       setAllowChatUpload(config.allowChatUpload);
+      setAllowChatDelete(config.allowChatDelete);
     } catch (error) {
       setChats([]);
       setAllowChatUpload(false);
+      setAllowChatDelete(false);
       const message =
         error instanceof Error ? error.message : "Chat-Liste konnte nicht geladen werden.";
       setListError(message);
@@ -160,15 +163,17 @@ export function LocalChatList({
                     Öffnen
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className="shrink-0 self-center rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-                  disabled={deletingSlug !== null}
-                  aria-label={`„${chat.title}“ löschen`}
-                  onClick={() => void handleDeleteChat(chat)}
-                >
-                  {deletingSlug === chat.slug ? "Lösche…" : "Löschen"}
-                </button>
+                {allowChatDelete && (
+                  <button
+                    type="button"
+                    className="shrink-0 self-center rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+                    disabled={deletingSlug !== null}
+                    aria-label={`„${chat.title}“ löschen`}
+                    onClick={() => void handleDeleteChat(chat)}
+                  >
+                    {deletingSlug === chat.slug ? "Lösche…" : "Löschen"}
+                  </button>
+                )}
               </div>
             ))}
           </div>

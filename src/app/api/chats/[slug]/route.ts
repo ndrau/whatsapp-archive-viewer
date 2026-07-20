@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { deleteChat } from "@/lib/chat-delete";
+import { deleteChat, isChatDeleteEnabled } from "@/lib/chat-delete";
 import { readBuiltChatIndex } from "@/lib/chat-store";
 import { requireApiSession } from "@/lib/require-auth";
 import { isValidSlug } from "@/lib/slug";
@@ -45,6 +45,10 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   const authError = await requireApiSession(request);
   if (authError) return authError;
 
+  if (!isChatDeleteEnabled()) {
+    return NextResponse.json({ error: "Chat-Löschen ist deaktiviert." }, { status: 403 });
+  }
+
   try {
     const { slug } = await params;
     if (!isValidSlug(slug)) {
@@ -55,7 +59,12 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     return NextResponse.json({ ok: true, slug });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Chat konnte nicht gelöscht werden.";
-    const status = message === "Chat nicht gefunden." ? 404 : 500;
+    const status =
+      message === "Chat nicht gefunden."
+        ? 404
+        : message === "Chat-Löschen ist deaktiviert."
+          ? 403
+          : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

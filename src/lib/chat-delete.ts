@@ -7,7 +7,18 @@ import {
 } from "@/lib/build-chats";
 import { isValidSlug, resolveSafePath } from "@/lib/slug";
 
+/** When true/1/yes/on, chat delete UI and API are enabled (default: disabled). */
+export function isChatDeleteEnabled(): boolean {
+  const raw = process.env.ALLOW_CHAT_DELETE?.trim().toLowerCase();
+  if (raw === undefined || raw === "") return false;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 export async function deleteChat(slug: string): Promise<{ slug: string }> {
+  if (!isChatDeleteEnabled()) {
+    throw new Error("Chat-Löschen ist deaktiviert.");
+  }
+
   if (!isValidSlug(slug)) {
     throw new Error("Ungültiger Chat-Name.");
   }
