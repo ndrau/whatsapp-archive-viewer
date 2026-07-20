@@ -14,9 +14,10 @@ import {
 import {
   type ChatTimelineModel,
   type TimelineDay,
-  dataRatioToTrackRatio,
+  dataRatioToCssPercent,
   findTimelineDayAtTrackRatio,
   formatTimelineDay,
+  trackRatioToCssPercent,
 } from "@/lib/chat-timeline";
 
 export interface MobileTimelineScrubberHandle {
@@ -33,16 +34,16 @@ interface MobileTimelineScrubberProps {
   onScrubbingChange?: (scrubbing: boolean) => void;
 }
 
-function ratioToPercent(ratio: number): string {
-  return `${dataRatioToTrackRatio(ratio) * 100}%`;
-}
-
 function dayPosition(day: TimelineDay): number {
   return (day.startRatio + day.endRatio) / 2;
 }
 
-function trackRatioToPercent(trackRatio: number): string {
-  return `${Math.min(1, Math.max(0, trackRatio)) * 100}%`;
+function dayTopPercent(day: TimelineDay): string {
+  return `${dataRatioToCssPercent(dayPosition(day))}%`;
+}
+
+function yearTopPercent(ratio: number): string {
+  return `${dataRatioToCssPercent(ratio)}%`;
 }
 
 function pointerTrackRatio(clientY: number, track: HTMLElement): number {
@@ -106,7 +107,7 @@ export const MobileTimelineScrubber = memo(
         (dayKey: string | undefined) => {
           const day = dayKey ? dayByKey.get(dayKey) : activeDay;
           if (!day) return;
-          setHandleTop(ratioToPercent(dayPosition(day)));
+          setHandleTop(dayTopPercent(day));
           setDisplayYear(day.date.getFullYear());
         },
         [activeDay, dayByKey],
@@ -154,7 +155,8 @@ export const MobileTimelineScrubber = memo(
 
           setScrubDay(day);
           setDisplayYear(day.date.getFullYear());
-          setHandleTop(trackRatioToPercent(pointerTrackRatio(clientY, track)));
+          // Pointer Y is already track-space — do not re-apply edge padding.
+          setHandleTop(`${trackRatioToCssPercent(pointerTrackRatio(clientY, track))}%`);
           onPreviewDay?.(day);
         },
         [onPreviewDay, resolveDayFromPointer],
@@ -244,7 +246,7 @@ export const MobileTimelineScrubber = memo(
                           ? "font-bold text-[var(--wa-accent)]"
                           : "font-semibold text-[var(--wa-text)]/45"
                       }`}
-                      style={{ top: ratioToPercent(year.ratio) }}
+                      style={{ top: yearTopPercent(year.ratio) }}
                     >
                       {year.year}
                     </span>
@@ -256,7 +258,7 @@ export const MobileTimelineScrubber = memo(
                     key={month.key}
                     aria-hidden="true"
                     className="absolute right-[11px] h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--wa-muted)]/35"
-                    style={{ top: ratioToPercent(month.ratio) }}
+                    style={{ top: yearTopPercent(month.ratio) }}
                   />
                 ))}
 
