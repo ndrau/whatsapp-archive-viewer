@@ -106,6 +106,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             : 0;
           const captionHeight = captionLines * TEXT_LINE_HEIGHT;
 
+          // Empty group (shouldn't happen) — treat like a short text row.
+          if (count === 0) {
+            return header + TEXT_LINE_HEIGHT + footer + bubble + SIZE_BUFFER;
+          }
           if (count === 1) return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
           if (count === 2) return header + 170 + captionHeight + footer + bubble + SIZE_BUFFER;
           return header + 330 + captionHeight + footer + bubble + SIZE_BUFFER;
@@ -116,6 +120,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         const header = message.sender === myName ? 0 : 22;
         const footer = 20;
         const bubble = 16;
+
+        // Omitted / missing media render as a single italic line — never reserve image height.
+        if (attachment && (attachment.omitted || !attachment.filename)) {
+          const textLines = message.text.trim()
+            ? Math.ceil(message.text.length / TEXT_CHARS_PER_LINE)
+            : 1;
+          return header + bubble + textLines * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
+        }
 
         if (attachment?.kind === "image" || attachment?.kind === "video" || attachment?.kind === "sticker") {
           const captionLines = message.text.trim()
@@ -190,9 +202,15 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
     scrollAnchorRef.current = null;
     container.scrollTop = anchor.top + (container.scrollHeight - anchor.height);
-    // Keep sizes frozen until the next scroll-idle tick so RO cannot fight the anchor.
+    // Freeze only briefly so RO cannot fight the anchor — then remeasure.
+    // Must not wait for another scroll event (prepend often happens on scroll-idle).
     freezeRowMeasureRef.current = true;
-  }, [messages]);
+    const unfreezeTimer = window.setTimeout(() => {
+      freezeRowMeasureRef.current = false;
+      rowVirtualizer.measure();
+    }, 120);
+    return () => window.clearTimeout(unfreezeTimer);
+  }, [messages, rowVirtualizer]);
 
   const previewTimelineDay = useCallback(
     (dayKey?: string) => {
