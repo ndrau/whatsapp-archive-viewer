@@ -169,21 +169,41 @@ export const MobileTimelineScrubber = memo(
         [onPreviewDay, resolveDayForInteraction],
       );
 
+      const scrubStartYRef = useRef(0);
+      const scrubDraggedRef = useRef(false);
+
       const startScrub = useCallback(
         (clientY: number) => {
           isScrubbingRef.current = true;
+          scrubStartYRef.current = clientY;
+          scrubDraggedRef.current = false;
           handleVisibleRef.current = true;
           setHandleVisible(true);
           setExpanded(true);
           onScrubbingChange?.(true);
+
+          // Keep the currently shown day on tap-in-place; only re-resolve after drag.
+          if (scrubDayRef.current || activeDay) {
+            const day = scrubDayRef.current ?? activeDay;
+            if (day) {
+              scrubDayRef.current = day;
+              setScrubDay(day);
+              setDisplayYear(day.date.getFullYear());
+              setHandleTop(dayTopPercent(day));
+              onPreviewDay?.(day);
+            }
+            return;
+          }
+
           updateScrub(clientY);
         },
-        [onScrubbingChange, updateScrub],
+        [activeDay, onPreviewDay, onScrubbingChange, updateScrub],
       );
 
       const endScrub = useCallback(() => {
         const day = scrubDayRef.current;
         isScrubbingRef.current = false;
+        scrubDraggedRef.current = false;
         setExpanded(false);
         setScrubDay(undefined);
         onScrubbingChange?.(false);
@@ -201,6 +221,10 @@ export const MobileTimelineScrubber = memo(
 
         function onMove(event: PointerEvent) {
           event.preventDefault();
+          if (!scrubDraggedRef.current) {
+            if (Math.abs(event.clientY - scrubStartYRef.current) < 4) return;
+            scrubDraggedRef.current = true;
+          }
           updateScrub(event.clientY);
         }
 

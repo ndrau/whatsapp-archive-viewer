@@ -51,6 +51,7 @@ const TEXT_CHARS_PER_LINE = 56;
 const SCROLL_IDLE_MS = 220;
 const EXTEND_EDGE_PX = 480;
 const HANDLE_HIDE_MS = 1800;
+const JUMP_LOCK_MS = 750;
 
 export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -65,6 +66,8 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const pendingScrollRef = useRef<PendingScroll | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeDayRef = useRef<string | undefined>(undefined);
+  const jumpLockUntilRef = useRef(0);
+  const hasInitializedRef = useRef(false);
   const sidebarTimelineRef = useRef<ChatTimelineHandle>(null);
   const mobileScrubberRef = useRef<MobileTimelineScrubberHandle>(null);
   const isMobileRef = useRef(false);
@@ -300,13 +303,17 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const jumpToDay = useCallback(
     (dayKey: string) => {
       const dayIndex = chatIndex.days.findIndex((day) => day.key === dayKey);
-      if (dayIndex === -1) return;
+      if (dayIndex === -1) {
+        console.warn("Timeline-Sprung: Tag nicht im Index", dayKey);
+        return;
+      }
 
       setSearchActive(false);
       setSearchResults([]);
       setHighlightMessageId(undefined);
 
-      // Keep timeline on the clicked day immediately (scroll sync can lag a beat).
+      // Pin timeline + scroll-sync to the clicked day while the jump settles.
+      jumpLockUntilRef.current = performance.now() + JUMP_LOCK_MS;
       activeDayRef.current = dayKey;
       setActiveDayKey(dayKey);
       previewTimelineDay(dayKey);
@@ -314,7 +321,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       const startIndex = Math.max(0, dayIndex - DEFAULT_DAY_RADIUS);
       const endIndex = Math.min(chatIndex.days.length - 1, dayIndex + DEFAULT_DAY_RADIUS);
 
-      void loadRangeByIndices(startIndex, endIndex, { scrollTarget: { dayKey } });
+      void loadRangeByIndices(startIndex, endIndex, {
+        scrollTarget: { dayKey, align: "start" },
+      });
     },
     [chatIndex.days, loadRangeByIndices, previewTimelineDay],
   );
@@ -331,14 +340,22 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   }, []);
 
   useEffect(() => {
+    hasInitializedRef.current = false;
+  }, [chatIndex.slug]);
+
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
     const lastIndex = chatIndex.days.length - 1;
     if (lastIndex < 0) return;
 
+    hasInitializedRef.current = true;
     const startIndex = Math.max(0, lastIndex - DEFAULT_DAY_RADIUS);
     void loadRangeByIndices(startIndex, lastIndex, {
       scrollTarget: { dayKey: chatIndex.days[lastIndex]?.key, align: "end" },
     });
-  }, [chatIndex.days, loadRangeByIndices]);
+    // Only once per chat — must not re-fire when loadRangeByIndices identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatIndex.slug, chatIndex.days]);
 
   useEffect(() => {
     clearTimeout(searchTimerRef.current);
@@ -377,30 +394,48 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     pendingScrollRef.current = null;
     const container = scrollRef.current;
 
-    if (target.align === "end" && !target.messageId && container) {
-      rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
-      scrollReadyRef.current = true;
-      return;
-    }
+    const scrollToTarget = () => {
+      if (target.align === "end" && !target.messageId && !target.dayKey) {
+        rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
+        return true;
+      }
 
-    const rowIndex = target.messageId
-      ? findRowIndexForMessage(rows, target.messageId)
-      : target.dayKey
-        ? findRowIndexForDay(rows, target.dayKey)
-        : -1;
+      const rowIndex = target.messageId
+        ? findRowIndexForMessage(rows, target.messageId)
+        : target.dayKey
+          ? findRowIndexForDay(rows, target.dayKey)
+          : -1;
 
-    if (rowIndex >= 0) {
-      rowVirtualizer.scrollToIndex(rowIndex, {
-        align: target.messageId ? "center" : (target.align ?? "start"),
-        behavior: "auto",
+      if (rowIndex >= 0) {
+        rowVirtualizer.scrollToIndex(rowIndex, {
+          align: target.messageId ? "center" : (target.align ?? "start"),
+          behavior: "auto",
+        });
+        return true;
+      }
+
+      return false;
+    };
+
+    const scrolled = scrollToTarget();
+    if (!scrolled && container && target.dayKey) {
+      // Target day missing from rows — stay put rather than jumping to scrollTop 0
+      // of an unrelated window. Retry once after the virtualizer measures.
+      requestAnimationFrame(() => {
+        if (!scrollToTarget() && container && target.align === "end") {
+          rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
+        }
       });
-      scrollReadyRef.current = true;
-      return;
+    } else if (!scrolled && container && target.align === "end") {
+      rowVirtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "auto" });
+    } else if (scrolled) {
+      // Re-apply after measure so estimate→actual size shifts don't leave us on the wrong day.
+      requestAnimationFrame(() => {
+        scrollToTarget();
+        requestAnimationFrame(() => scrollToTarget());
+      });
     }
 
-    if (container) {
-      container.scrollTop = 0;
-    }
     scrollReadyRef.current = true;
   }, [messages, rowVirtualizer, rows]);
 
@@ -531,10 +566,17 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       lastScrollTopRef.current = container.scrollTop;
       lastScrollTimeRef.current = performance.now();
 
-      const nextDayKey = resolveActiveDayFromScroll();
-      if (nextDayKey) {
-        activeDayRef.current = nextDayKey;
-        previewTimelineDay(nextDayKey);
+      const jumpLocked = performance.now() < jumpLockUntilRef.current;
+
+      if (!jumpLocked) {
+        const nextDayKey = resolveActiveDayFromScroll();
+        if (nextDayKey) {
+          activeDayRef.current = nextDayKey;
+          previewTimelineDay(nextDayKey);
+        }
+      } else if (activeDayRef.current) {
+        // Keep the clicked day visible on the timeline while the jump settles.
+        previewTimelineDay(activeDayRef.current);
       }
 
       if (isMobileRef.current && !scrubbingRef.current) {
@@ -547,7 +589,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (activeDayRef.current) {
           setActiveDayKey(activeDayRef.current);
         }
-        void maybeExtendWindow();
+        if (performance.now() >= jumpLockUntilRef.current) {
+          void maybeExtendWindow();
+        }
       }, SCROLL_IDLE_MS);
     };
 

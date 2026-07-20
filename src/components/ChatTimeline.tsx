@@ -103,10 +103,14 @@ export const ChatTimeline = memo(
     const hoverDayRef = useRef<TimelineDay | undefined>(undefined);
     const lastTrackRatioRef = useRef(0.5);
     const selectedOnPointerUpRef = useRef(false);
+    const scrubStartYRef = useRef(0);
+    const scrubDraggedRef = useRef(false);
 
     const [hoverDay, setHoverDay] = useState<TimelineDay | undefined>();
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [displayYear, setDisplayYear] = useState<number | undefined>();
+
+    const SCRUB_DRAG_THRESHOLD_PX = 4;
 
     const activeDay = useMemo(
       () => model.days.find((day) => day.key === activeDayKey) ?? model.days[0],
@@ -240,6 +244,13 @@ export const ChatTimeline = memo(
       if (!isScrubbing) return;
 
       function onMove(event: PointerEvent) {
+        if (!scrubDraggedRef.current) {
+          if (Math.abs(event.clientY - scrubStartYRef.current) < SCRUB_DRAG_THRESHOLD_PX) {
+            return;
+          }
+          scrubDraggedRef.current = true;
+        }
+
         const day = resolveDayForInteraction(event.clientY);
         if (!day) return;
         showDayAtPointer(event.clientY, day);
@@ -247,11 +258,11 @@ export const ChatTimeline = memo(
       }
 
       function onUp() {
-        // Select the day the tooltip already shows — never re-hit-test on release
-        // (tiny pointer jitter near the top used to jump May 29 → June 2).
+        // Always select the day currently shown in the tooltip.
         const day = shownDayRef.current ?? previewDayRef.current;
         isScrubbingRef.current = false;
         setIsScrubbing(false);
+        scrubDraggedRef.current = false;
 
         if (day) {
           previewDayRef.current = day;
@@ -304,6 +315,8 @@ export const ChatTimeline = memo(
             selectedOnPointerUpRef.current = false;
             pendingJumpKeyRef.current = undefined;
             edgePinnedRef.current = false;
+            scrubStartYRef.current = event.clientY;
+            scrubDraggedRef.current = false;
             onScrubStart?.();
             isScrubbingRef.current = true;
             setIsScrubbing(true);
@@ -312,6 +325,17 @@ export const ChatTimeline = memo(
               trackRef.current?.setPointerCapture(event.pointerId);
             } catch {
               // ignore — capture is optional
+            }
+
+            // Click-in-place: keep the tooltip day the user already sees.
+            // Re-hit-testing on pointerdown was overwriting "29. Mai" with nearby days.
+            const existing = shownDayRef.current ?? previewDayRef.current;
+            if (existing) {
+              hoverDayRef.current = existing;
+              setHoverDay(existing);
+              paintDay(existing);
+              onPreviewDay?.(existing);
+              return;
             }
 
             const day = handlePointer(event.clientY);

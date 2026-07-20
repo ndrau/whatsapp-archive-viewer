@@ -57,7 +57,9 @@ export function buildVirtualRows(messages: ChatMessage[]): VirtualChatRow[] {
 }
 
 export function findRowIndexForDay(rows: VirtualChatRow[], dayKey: string): number {
-  return rows.findIndex((row) => row.kind === "day-header" && row.dayKey === dayKey);
+  const headerIndex = rows.findIndex((row) => row.kind === "day-header" && row.dayKey === dayKey);
+  if (headerIndex >= 0) return headerIndex;
+  return rows.findIndex((row) => row.dayKey === dayKey);
 }
 
 export function findRowIndexForMessage(rows: VirtualChatRow[], messageId: string): number {
