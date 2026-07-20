@@ -1,0 +1,33 @@
+# Heimnetz-Deployment (TrueNAS Scale / Portainer)
+#
+# 1) Datasets anlegen (Beispiel-Pfade anpassen):
+#      /mnt/tank/apps/whatsapp-archive/chats
+#      /mnt/tank/apps/whatsapp-archive/built
+# 2) Chat-Export nach chats/denise/ kopieren (_chat.txt + Medien + meta.json)
+# 3) Unten host-Pfade setzen, dann:
+#      docker compose up -d --build
+# 4) Im Heimnetz: http://<truenas-ip>:3080
+
+services:
+  whatsapp-archive:
+    build: .
+    image: whatsapp-archive-viewer:local
+    container_name: whatsapp-archive
+    restart: unless-stopped
+    ports:
+      - "3080:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # 1 = beim Start chats/ neu parsen (empfohlen nach Export-Update)
+      # 0 = vorhandenes .built Volume nutzen (schnellerer Start)
+      BUILD_CHATS_ON_START: "1"
+    volumes:
+      # Rohdaten — bleiben bei Image-Updates erhalten (read-only reicht)
+      - /mnt/tank/apps/whatsapp-archive/chats:/app/chats:ro
+      # Generierte App-Daten — bei Bedarf löschen + Container neu starten
+      - /mnt/tank/apps/whatsapp-archive/built:/app/.built
+    # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
+    # user: "0:0"
+    # Nur Heimnetz: kein Port-Forward am Router

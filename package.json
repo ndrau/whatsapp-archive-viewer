@@ -9,10 +9,12 @@
     "dev:webpack": "node scripts/next-dev-safe.mjs --webpack",
     "dev:full": "pnpm run build:chats && node scripts/next-dev-safe.mjs",
     "build:chats": "tsx scripts/build-chats.ts",
-    "build": "pnpm run build:chats && node scripts/next-build-safe.mjs",
+    "build:app": "node scripts/next-build-safe.mjs",
+    "build": "pnpm run build:chats && pnpm run build:app",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm run typecheck && pnpm run lint",
     "start": "next start",
+    "start:docker": "node scripts/docker-entrypoint.mjs",
     "lint": "eslint"
   },
   "dependencies": {

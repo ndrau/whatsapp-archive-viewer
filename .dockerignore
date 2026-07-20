@@ -1,0 +1,14 @@
+node_modules
+.next
+.built
+chats/**
+!chats/.gitkeep
+.git
+.gitignore
+*.md
+*.zip
+WhatsApp Chat*.zip
+tsconfig.tsbuildinfo
+.DS_Store
+.env*
+agent-transcripts
