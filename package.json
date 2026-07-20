@@ -3,14 +3,20 @@
   "description": "WhatsApp chat export viewer and HTML archiver",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.12.0",
   "scripts": {
-    "dev": "npm run build:chats && next dev",
+    "dev": "node scripts/next-dev-safe.mjs",
+    "dev:webpack": "node scripts/next-dev-safe.mjs --webpack",
+    "dev:full": "pnpm run build:chats && node scripts/next-dev-safe.mjs",
     "build:chats": "tsx scripts/build-chats.ts",
-    "build": "npm run build:chats && next build",
+    "build": "pnpm run build:chats && node scripts/next-build-safe.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm run typecheck && pnpm run lint",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.14.7",
     "jszip": "^3.10.1",
     "next": "15.5.19",
     "react": "19.1.0",

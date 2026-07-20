@@ -17,11 +17,20 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--wa-page-bg);
   color: var(--wa-text);
   font-family: var(--font-geist-sans), "Segoe UI", system-ui, sans-serif;
+}
+
+body[data-chat-open="true"] {
+  overflow: hidden;
 }
 
 code {
@@ -31,6 +40,28 @@ code {
 
 .timeline-track {
   touch-action: none;
+  min-height: 100%;
+}
+
+.chat-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.virtual-chat-row {
+  contain: layout style;
+  will-change: transform;
+}
+
+.chat-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-shell {
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .timeline-year,
@@ -73,4 +104,8 @@ code {
 .media-grid-4 {
   grid-template-columns: repeat(2, 1fr);
   grid-template-rows: repeat(2, 1fr);
+}
+
+.voice-message button {
+  cursor: pointer;
 }

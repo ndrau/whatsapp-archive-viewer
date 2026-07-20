@@ -45,7 +45,7 @@ const MONTH_LABELS = [
 export function formatTimelineDay(date: Date): string {
   return new Intl.DateTimeFormat("de-DE", {
     day: "numeric",
-    month: "short",
+    month: "long",
     year: "numeric",
   }).format(date);
 }
@@ -114,6 +114,22 @@ export function buildChatTimeline(
   return { days, years, months };
 }
 
+export const TIMELINE_EDGE_PADDING = 0.045;
+
+export function dataRatioToTrackRatio(ratio: number): number {
+  const clamped = Math.min(1, Math.max(0, ratio));
+  const min = TIMELINE_EDGE_PADDING;
+  const max = 1 - TIMELINE_EDGE_PADDING;
+  return min + clamped * (max - min);
+}
+
+export function trackRatioToDataRatio(trackRatio: number): number {
+  const clamped = Math.min(1, Math.max(0, trackRatio));
+  const min = TIMELINE_EDGE_PADDING;
+  const max = 1 - TIMELINE_EDGE_PADDING;
+  return Math.min(1, Math.max(0, (clamped - min) / (max - min)));
+}
+
 export function findTimelineDayAtRatio(
   days: TimelineDay[],
   ratio: number,
@@ -125,6 +141,13 @@ export function findTimelineDayAtRatio(
   if (direct) return direct;
 
   return days.at(-1);
+}
+
+export function findTimelineDayAtTrackRatio(
+  days: TimelineDay[],
+  trackRatio: number,
+): TimelineDay | undefined {
+  return findTimelineDayAtRatio(days, trackRatioToDataRatio(trackRatio));
 }
 
 export function findTimelineDayFromScroll(

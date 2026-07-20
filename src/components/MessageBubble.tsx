@@ -2,6 +2,7 @@
 
 import { MessageText } from "@/components/MessageText";
 import { MediaGrid } from "@/components/MediaGrid";
+import { VoiceMessagePlayer } from "@/components/VoiceMessagePlayer";
 import {
   buildMediaUrl,
   findMediaBlob,
@@ -21,10 +22,16 @@ interface MessageBubbleProps {
 interface MediaAttachmentProps {
   message: ChatMessage;
   exportData: WhatsAppExport;
+  timestamp: string;
   onOpenMedia?: (items: MediaGalleryItem[], index: number) => void;
 }
 
-function MediaAttachment({ message, exportData, onOpenMedia }: MediaAttachmentProps) {
+function MediaAttachment({
+  message,
+  exportData,
+  timestamp,
+  onOpenMedia,
+}: MediaAttachmentProps) {
   const attachment = message.attachment;
 
   if (!attachment) return null;
@@ -64,7 +71,7 @@ function MediaAttachment({ message, exportData, onOpenMedia }: MediaAttachmentPr
         <img
           src={mediaUrl}
           alt={attachment.filename}
-          className="max-h-80 max-w-full rounded-xl object-cover"
+          className="h-64 max-w-full rounded-xl bg-black/5 object-cover"
           loading="lazy"
         />
       </button>
@@ -77,7 +84,7 @@ function MediaAttachment({ message, exportData, onOpenMedia }: MediaAttachmentPr
         <video
           preload="metadata"
           src={mediaUrl}
-          className="max-h-80 max-w-full rounded-xl object-cover"
+          className="h-64 max-w-full rounded-xl bg-black/5 object-cover"
         />
         <span className="absolute bottom-3 left-3 rounded bg-black/60 px-2 py-1 text-xs text-white">
           Video öffnen
@@ -88,11 +95,21 @@ function MediaAttachment({ message, exportData, onOpenMedia }: MediaAttachmentPr
 
   if (attachment.kind === "audio") {
     const voice = isVoiceMessage(attachment.filename);
+
+    if (voice) {
+      return (
+        <VoiceMessagePlayer
+          src={mediaUrl}
+          filename={attachment.filename}
+          sender={message.sender}
+          timestamp={timestamp}
+        />
+      );
+    }
+
     return (
       <div className="mb-2 min-w-[240px] rounded-xl bg-black/5 px-3 py-2">
-        <p className="mb-2 text-xs font-medium text-[var(--wa-muted)]">
-          {voice ? "Sprachnachricht" : "Audio"}
-        </p>
+        <p className="mb-2 text-xs font-medium text-[var(--wa-muted)]">Audio</p>
         <audio controls preload="metadata" src={mediaUrl} className="w-full" />
       </div>
     );
@@ -124,6 +141,18 @@ export function MessageBubble({
     minute: "2-digit",
   }).format(message.date);
 
+  const shortTimestamp = new Intl.DateTimeFormat("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(message.date);
+
+  const isVoiceOnly =
+    Boolean(message.attachment) &&
+    message.attachment?.kind === "audio" &&
+    message.attachment.filename &&
+    isVoiceMessage(message.attachment.filename) &&
+    !message.text;
+
   return (
     <article className={`flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
@@ -133,19 +162,27 @@ export function MessageBubble({
             : "rounded-bl-md bg-[var(--wa-incoming)]"
         }`}
       >
-        {!isOutgoing && (
+        {!isOutgoing && !isVoiceOnly && (
           <p className="mb-1 text-xs font-semibold text-[var(--wa-accent)]">{message.sender}</p>
         )}
 
         <MediaAttachment
           message={message}
           exportData={exportData}
+          timestamp={shortTimestamp}
           onOpenMedia={onOpenMedia}
         />
 
         {message.text && <MessageText text={message.text} />}
 
-        <p className="mt-1 text-right text-[11px] text-[var(--wa-muted)]">{timestamp}</p>
+        {!isVoiceOnly && (
+          <div className="mt-1 flex items-end justify-end gap-1.5">
+            {message.edited && (
+              <span className="text-[11px] leading-none text-[var(--wa-muted)]">bearbeitet</span>
+            )}
+            <span className="text-[11px] leading-none text-[var(--wa-muted)]">{timestamp}</span>
+          </div>
+        )}
       </div>
     </article>
   );

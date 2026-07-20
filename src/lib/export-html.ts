@@ -52,12 +52,14 @@ function renderMessageHtml(message: ChatMessage, myName: string, index: number):
     body += `<p class="text">${linkifyPlainTextToHtml(message.text, escapeHtml).replaceAll("\n", "<br />")}</p>`;
   }
 
+  const editedLabel = message.edited ? `<span class="edited">bearbeitet</span>` : "";
+
   return `
     <article class="message ${outgoing ? "outgoing" : "incoming"}">
       <div class="bubble">
         <header>
           <strong>${escapeHtml(message.sender)}</strong>
-          <time datetime="${message.date.toISOString()}">${formatGermanDate(message.date)}</time>
+          <span class="meta">${editedLabel}<time datetime="${message.date.toISOString()}">${formatGermanDate(message.date)}</time></span>
         </header>
         ${body}
       </div>
@@ -145,6 +147,15 @@ function buildHtmlDocument(exportData: WhatsAppExport, myName: string): string {
         color: var(--muted);
       }
       header strong { color: var(--accent); }
+      .meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .edited {
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
       .text {
         margin: 0;
         white-space: pre-wrap;

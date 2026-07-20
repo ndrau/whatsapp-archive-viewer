@@ -11,6 +11,7 @@ export interface ChatMessage {
   date: Date;
   sender: string;
   text: string;
+  edited?: boolean;
   attachment?: ParsedAttachment;
 }
 

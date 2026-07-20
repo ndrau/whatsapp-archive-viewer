@@ -1,155 +1,295 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   type ChatTimelineModel,
   type TimelineDay,
+  dataRatioToTrackRatio,
   findTimelineDayAtRatio,
+  findTimelineDayAtTrackRatio,
   formatTimelineDay,
 } from "@/lib/chat-timeline";
+
+export interface ChatTimelineHandle {
+  previewDay: (day: TimelineDay | undefined) => void;
+}
 
 interface ChatTimelineProps {
   model: ChatTimelineModel;
   activeDayKey?: string;
   onSelectDay: (day: TimelineDay) => void;
+  onPreviewDay?: (day: TimelineDay) => void;
+  onScrubStart?: () => void;
+  onScrubEnd?: () => void;
 }
 
 function ratioToPercent(ratio: number): string {
-  return `${Math.min(100, Math.max(0, ratio * 100))}%`;
+  return `${dataRatioToTrackRatio(ratio) * 100}%`;
 }
 
-export function ChatTimeline({ model, activeDayKey, onSelectDay }: ChatTimelineProps) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [hoverDay, setHoverDay] = useState<TimelineDay | undefined>();
-  const [isScrubbing, setIsScrubbing] = useState(false);
+function dayPosition(day: TimelineDay): number {
+  return (day.startRatio + day.endRatio) / 2;
+}
 
-  const activeDay = useMemo(
-    () => model.days.find((day) => day.key === activeDayKey) ?? model.days[0],
-    [activeDayKey, model.days],
-  );
+function trackRatioToPercent(trackRatio: number): string {
+  return `${Math.min(1, Math.max(0, trackRatio)) * 100}%`;
+}
 
-  const displayDay = hoverDay ?? activeDay;
+function applyMarkerPosition(
+  line: HTMLElement | null,
+  dot: HTMLElement | null,
+  label: HTMLElement | null,
+  day: TimelineDay | undefined,
+  trackRatio?: number,
+) {
+  if (!day) return;
 
-  const resolveDayFromPointer = useCallback(
-    (clientY: number) => {
-      const track = trackRef.current;
-      if (!track || model.days.length === 0) return undefined;
+  const top =
+    trackRatio === undefined ? ratioToPercent(dayPosition(day)) : trackRatioToPercent(trackRatio);
+  if (line) line.style.top = top;
+  if (dot) dot.style.top = top;
+  if (label) {
+    label.style.top = top;
+    label.textContent = formatTimelineDay(day.date);
+  }
+}
 
-      const rect = track.getBoundingClientRect();
-      const ratio = (clientY - rect.top) / rect.height;
-      return findTimelineDayAtRatio(model.days, ratio);
+function pointerTrackRatio(clientY: number, track: HTMLElement): number {
+  const rect = track.getBoundingClientRect();
+  if (rect.height <= 0) return 0;
+  return Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+}
+
+export const ChatTimeline = memo(
+  forwardRef<ChatTimelineHandle, ChatTimelineProps>(function ChatTimeline(
+    {
+      model,
+      activeDayKey,
+      onSelectDay,
+      onPreviewDay,
+      onScrubStart,
+      onScrubEnd,
     },
-    [model.days],
-  );
+    ref,
+  ) {
+    const trackRef = useRef<HTMLDivElement>(null);
+    const lineRef = useRef<HTMLDivElement>(null);
+    const dotRef = useRef<HTMLSpanElement>(null);
+    const labelRef = useRef<HTMLDivElement>(null);
+    const previewDayRef = useRef<TimelineDay | undefined>(undefined);
+    const isScrubbingRef = useRef(false);
+    const hoverDayRef = useRef<TimelineDay | undefined>(undefined);
+    const selectedOnPointerUpRef = useRef(false);
 
-  const handlePointer = useCallback(
-    (clientY: number, select: boolean) => {
-      const day = resolveDayFromPointer(clientY);
-      if (!day) return;
+    const [hoverDay, setHoverDay] = useState<TimelineDay | undefined>();
+    const [isScrubbing, setIsScrubbing] = useState(false);
+    const [displayYear, setDisplayYear] = useState<number | undefined>();
 
-      setHoverDay(day);
-      if (select) onSelectDay(day);
-    },
-    [onSelectDay, resolveDayFromPointer],
-  );
+    const activeDay = useMemo(
+      () => model.days.find((day) => day.key === activeDayKey) ?? model.days[0],
+      [activeDayKey, model.days],
+    );
 
-  useEffect(() => {
-    if (!isScrubbing) return;
+    const displayDay = hoverDay ?? previewDayRef.current ?? activeDay;
 
-    function onMove(event: PointerEvent) {
-      handlePointer(event.clientY, true);
-    }
+    useImperativeHandle(ref, () => ({
+      previewDay(day) {
+        previewDayRef.current = day;
+        if (isScrubbingRef.current || hoverDayRef.current) return;
+        applyMarkerPosition(lineRef.current, dotRef.current, labelRef.current, day ?? activeDay);
+        setDisplayYear((day ?? activeDay)?.date.getFullYear());
+      },
+    }));
 
-    function onUp() {
-      setIsScrubbing(false);
-    }
+    useEffect(() => {
+      if (isScrubbing || hoverDay) return;
+      previewDayRef.current = activeDay;
+      applyMarkerPosition(lineRef.current, dotRef.current, labelRef.current, activeDay);
+      setDisplayYear(activeDay?.date.getFullYear());
+    }, [activeDay, hoverDay, isScrubbing]);
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    const resolveDayFromPointer = useCallback(
+      (clientY: number) => {
+        const track = trackRef.current;
+        if (!track || model.days.length === 0) return undefined;
 
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [handlePointer, isScrubbing]);
+        const trackRatio = pointerTrackRatio(clientY, track);
+        return findTimelineDayAtTrackRatio(model.days, trackRatio);
+      },
+      [model.days],
+    );
 
-  if (model.days.length === 0) return null;
+    const showDayAtPointer = useCallback(
+      (clientY: number, day: TimelineDay) => {
+        const track = trackRef.current;
+        if (!track) return;
 
-  return (
-    <aside className="relative hidden w-16 shrink-0 select-none md:block lg:w-20">
-      <div
-        ref={trackRef}
-        className="timeline-track relative h-full cursor-pointer"
-        onPointerDown={(event) => {
-          setIsScrubbing(true);
-          handlePointer(event.clientY, true);
-        }}
-        onPointerMove={(event) => {
-          if (isScrubbing) return;
-          handlePointer(event.clientY, false);
-        }}
-        onPointerLeave={() => {
-          if (!isScrubbing) setHoverDay(undefined);
-        }}
-      >
-        <div className="absolute inset-y-3 right-3 w-px bg-[var(--wa-muted)]/35" />
+        hoverDayRef.current = day;
+        setHoverDay(day);
+        setDisplayYear(day.date.getFullYear());
+        applyMarkerPosition(
+          lineRef.current,
+          dotRef.current,
+          labelRef.current,
+          day,
+          pointerTrackRatio(clientY, track),
+        );
+      },
+      [],
+    );
 
-        {model.years.map((year) => (
-          <button
-            key={year.key}
-            type="button"
-            className="timeline-year absolute right-5 -translate-y-1/2 text-[11px] font-semibold leading-none text-[var(--wa-text)]/75 transition hover:text-[var(--wa-accent)]"
-            style={{ top: ratioToPercent(year.ratio) }}
-            onClick={(event) => {
-              event.stopPropagation();
-              const day = findTimelineDayAtRatio(model.days, year.ratio);
-              if (day) onSelectDay(day);
-            }}
-          >
-            {year.year}
-          </button>
-        ))}
+    const handlePointer = useCallback(
+      (clientY: number) => {
+        const day = resolveDayFromPointer(clientY);
+        if (!day) return;
+        showDayAtPointer(clientY, day);
+        return day;
+      },
+      [resolveDayFromPointer, showDayAtPointer],
+    );
 
-        {model.months.map((month) => (
-          <button
-            key={month.key}
-            type="button"
-            aria-label={month.label}
-            className="timeline-month absolute right-[11px] h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-[var(--wa-muted)]/45 transition hover:scale-125 hover:bg-[var(--wa-accent)]"
-            style={{ top: ratioToPercent(month.ratio) }}
-            onClick={(event) => {
-              event.stopPropagation();
-              const day = findTimelineDayAtRatio(model.days, month.ratio);
-              if (day) onSelectDay(day);
-            }}
-          />
-        ))}
+    useEffect(() => {
+      if (!isScrubbing) return;
 
-        {displayDay && (
-          <>
-            <span
-              className="absolute right-2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--wa-accent)] shadow"
-              style={{
-                top: ratioToPercent((displayDay.startRatio + displayDay.endRatio) / 2),
+      function onMove(event: PointerEvent) {
+        const day = resolveDayFromPointer(event.clientY);
+        if (!day) return;
+        showDayAtPointer(event.clientY, day);
+        onPreviewDay?.(day);
+      }
+
+      function onUp(event: PointerEvent) {
+        const day = resolveDayFromPointer(event.clientY);
+        isScrubbingRef.current = false;
+        setIsScrubbing(false);
+        hoverDayRef.current = undefined;
+        setHoverDay(undefined);
+        previewDayRef.current = day ?? previewDayRef.current;
+        onScrubEnd?.();
+        if (day && !selectedOnPointerUpRef.current) {
+          selectedOnPointerUpRef.current = true;
+          onSelectDay(day);
+        }
+      }
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+
+      return () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+    }, [isScrubbing, onPreviewDay, onScrubEnd, onSelectDay, resolveDayFromPointer, showDayAtPointer]);
+
+    if (model.days.length === 0) return null;
+
+    return (
+      <aside className="relative hidden w-[84px] shrink-0 border-l border-black/5 bg-white/40 md:block lg:w-[92px]">
+        <div
+          ref={trackRef}
+          className="timeline-track absolute inset-0 cursor-pointer"
+          onPointerDown={(event) => {
+            if ((event.target as HTMLElement).closest("button")) return;
+
+            event.preventDefault();
+            selectedOnPointerUpRef.current = false;
+            onScrubStart?.();
+            isScrubbingRef.current = true;
+            setIsScrubbing(true);
+            const day = handlePointer(event.clientY);
+            if (day) onPreviewDay?.(day);
+          }}
+          onPointerMove={(event) => {
+            if (isScrubbing) return;
+            handlePointer(event.clientY);
+          }}
+          onPointerLeave={() => {
+            if (!isScrubbingRef.current) {
+              hoverDayRef.current = undefined;
+              setHoverDay(undefined);
+            }
+          }}
+        >
+          <div className="absolute inset-y-6 right-3 w-px bg-[var(--wa-muted)]/30" />
+
+          {model.years.map((year) => {
+            const isActive = displayYear === year.year;
+
+            return (
+              <button
+                key={year.key}
+                type="button"
+                className={`timeline-year absolute left-1 right-5 -translate-y-1/2 text-right text-[10px] leading-none ${
+                  isActive
+                    ? "font-bold text-[var(--wa-accent)]"
+                    : "font-semibold text-[var(--wa-text)]/55 hover:text-[var(--wa-accent)]"
+                }`}
+                style={{ top: ratioToPercent(year.ratio) }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  selectedOnPointerUpRef.current = true;
+                  const day = findTimelineDayAtRatio(model.days, year.ratio);
+                  if (day) onSelectDay(day);
+                }}
+              >
+                {year.year}
+              </button>
+            );
+          })}
+
+          {model.months.map((month) => (
+            <button
+              key={month.key}
+              type="button"
+              aria-label={month.label}
+              className="timeline-month absolute right-[10px] h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--wa-muted)]/40 transition hover:scale-125 hover:bg-[var(--wa-accent)]"
+              style={{ top: ratioToPercent(month.ratio) }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                selectedOnPointerUpRef.current = true;
+                const day = findTimelineDayAtRatio(model.days, month.ratio);
+                if (day) onSelectDay(day);
               }}
             />
-            <div
-              className="pointer-events-none absolute right-8 z-20 -translate-y-1/2 rounded-xl bg-white px-3 py-2 text-xs font-medium text-[var(--wa-text)] shadow-lg ring-1 ring-black/5"
-              style={{
-                top: ratioToPercent((displayDay.startRatio + displayDay.endRatio) / 2),
-              }}
-            >
-              <p>{formatTimelineDay(displayDay.date)}</p>
-              {isScrubbing && (
-                <p className="mt-0.5 text-[10px] font-normal text-[var(--wa-muted)]">
-                  Loslassen zum Springen
+          ))}
+
+          {displayDay && (
+            <>
+              <div
+                ref={lineRef}
+                className="pointer-events-none absolute left-1 right-[11px] z-10 h-[2px] -translate-y-1/2 rounded-full bg-[var(--wa-accent)]"
+                style={{ top: ratioToPercent(dayPosition(displayDay)) }}
+              />
+              <span
+                ref={dotRef}
+                className="pointer-events-none absolute right-[8px] z-10 h-2 w-2 -translate-y-1/2 rounded-full border border-white bg-[var(--wa-accent)] shadow"
+                style={{ top: ratioToPercent(dayPosition(displayDay)) }}
+              />
+              <div
+                ref={labelRef}
+                className="pointer-events-none absolute right-[18px] z-20 -translate-x-full -translate-y-1/2 rounded-lg bg-white px-2.5 py-1.5 shadow-md ring-1 ring-black/8"
+                style={{ top: ratioToPercent(dayPosition(displayDay)) }}
+              >
+                <p className="whitespace-nowrap text-[11px] font-semibold leading-none text-[var(--wa-text)]">
+                  {formatTimelineDay(displayDay.date)}
                 </p>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </aside>
-  );
-}
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+    );
+  }),
+);

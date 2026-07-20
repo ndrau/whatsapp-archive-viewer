@@ -12,7 +12,7 @@ export async function GET() {
 
     return NextResponse.json(
       {
-        error: "Kein Chat-Build gefunden. Bitte npm run build:chats ausführen.",
+        error: "Kein Chat-Build gefunden. Bitte pnpm run build:chats ausführen.",
         chats: [],
       },
       { status: 503 },
@@ -20,19 +20,6 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Chats konnten nicht geladen werden." },
-      { status: 500 },
-    );
-  }
-}
-
-export async function POST() {
-  try {
-    const { buildAllChats } = await import("@/lib/build-chats");
-    const manifest = await buildAllChats();
-    return NextResponse.json({ ok: true, manifest });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Chat-Build fehlgeschlagen." },
       { status: 500 },
     );
   }

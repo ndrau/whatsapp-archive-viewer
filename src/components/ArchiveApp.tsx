@@ -1,15 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ChatViewer } from "@/components/ChatViewer";
 import { LocalChatList } from "@/components/LocalChatList";
-import { UploadZone } from "@/components/UploadZone";
-import { countMediaStats, downloadHtmlArchive } from "@/lib/export-html";
+import { downloadHtmlArchive } from "@/lib/export-html";
+import { getMediaKind, isVoiceMessage } from "@/lib/media-types";
+import {
+  loadAllMessagesForExport,
+  loadChatIndex,
+  toWhatsAppExport,
+  type ChatIndexResponse,
+} from "@/lib/load-local-chat";
 import type { WhatsAppExport } from "@/types/whatsapp";
 
 export function ArchiveApp() {
-  const [exportData, setExportData] = useState<WhatsAppExport | null>(null);
+  const [chatIndex, setChatIndex] = useState<ChatIndexResponse | null>(null);
   const [sourceLabel, setSourceLabel] = useState("");
   const [myName, setMyName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -17,173 +23,190 @@ export function ArchiveApp() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const stats = useMemo(
-    () => (exportData ? countMediaStats(exportData) : null),
-    [exportData],
-  );
+  const exportData = useMemo<WhatsAppExport | null>(() => {
+    if (!chatIndex) return null;
 
-  function handleExportLoaded(data: WhatsAppExport, label: string) {
-    setExportData(data);
-    setSourceLabel(label);
-    setSearchQuery("");
+    return toWhatsAppExport(chatIndex, []);
+  }, [chatIndex]);
+
+  const stats = useMemo(() => {
+    if (!chatIndex) return null;
+
+    const stats = { images: 0, videos: 0, audio: 0, voice: 0 };
+
+    for (const filename of chatIndex.mediaFiles) {
+      const kind = getMediaKind(filename);
+      if (kind === "image" || kind === "sticker") stats.images += 1;
+      else if (kind === "video") stats.videos += 1;
+      else if (kind === "audio") {
+        stats.audio += 1;
+        if (isVoiceMessage(filename)) stats.voice += 1;
+      }
+    }
+
+    return stats;
+  }, [chatIndex]);
+
+  useEffect(() => {
+    document.body.dataset.chatOpen = chatIndex ? "true" : "false";
+    return () => {
+      delete document.body.dataset.chatOpen;
+    };
+  }, [chatIndex]);
+
+  async function handleChatSelected(slug: string, label: string) {
+    setLoading(true);
     setError("");
-    setMyName((current) => current || data.defaultMyName || data.participants[0] || "");
+
+    try {
+      const index = await loadChatIndex(slug);
+      setChatIndex(index);
+      setSourceLabel(label);
+      setSearchQuery("");
+      setMyName((current) => current || index.defaultMyName || index.participants[0] || "");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Chat konnte nicht geladen werden.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!chatIndex || !exportData) {
+    return (
+      <div className="min-h-screen bg-[var(--wa-page-bg)]">
+        <div className="mx-auto flex min-h-screen max-w-4xl flex-col px-4 py-8 sm:px-6">
+          <header className="mb-8 rounded-[28px] bg-[var(--wa-accent)] px-6 py-8 text-white shadow-xl">
+            <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archive Viewer</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Gespeicherte Chats ansehen</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85 sm:text-base">
+              Chats werden über <code>pnpm run build:chats</code> aus dem Ordner{" "}
+              <code>chats/</code> vorbereitet und hier nur noch angezeigt.
+            </p>
+          </header>
+
+          <LocalChatList
+            onChatSelected={handleChatSelected}
+            onError={setError}
+            onLoadingChange={setLoading}
+          />
+
+          {(loading || error) && <StatusToast loading={loading} error={error} />}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[var(--wa-page-bg)]">
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 sm:px-6">
-        <header className="mb-8 rounded-[28px] bg-[var(--wa-accent)] px-6 py-8 text-white shadow-xl">
-          <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archive Viewer</p>
-          <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">
-            Chats schön lesen und als HTML archivieren
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-white/85 sm:text-base">
-            Lädt deinen WhatsApp-Export mit <strong>_chat.txt</strong> und Medien, zeigt Bilder,
-            Videos und Sprachnachrichten an und erzeugt optional ein offline lesbares HTML-Archiv.
-            Alles passiert lokal im Browser.
-          </p>
+    <div className="chat-shell flex flex-col bg-[var(--wa-page-bg)]">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden px-3 py-3 sm:px-4">
+        <header className="mb-3 shrink-0 rounded-2xl bg-[var(--wa-accent)] px-4 py-3 text-white shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-xs uppercase tracking-[0.2em] text-white/70">{sourceLabel}</p>
+              <h1 className="truncate text-xl font-semibold">{chatIndex.chatTitle}</h1>
+              <p className="text-xs text-white/80">
+                {chatIndex.messageCount.toLocaleString("de-DE")} Nachrichten
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/25 px-3 py-1.5 text-sm font-medium"
+                onClick={() => {
+                  setChatIndex(null);
+                  setSourceLabel("");
+                  setError("");
+                }}
+              >
+                Zurück
+              </button>
+              <button
+                type="button"
+                disabled={exporting || !myName}
+                className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--wa-accent)] disabled:opacity-50"
+                onClick={async () => {
+                  if (!myName) return;
+                  setExporting(true);
+                  try {
+                    const messages = await loadAllMessagesForExport(chatIndex.slug);
+                    await downloadHtmlArchive(
+                      toWhatsAppExport(chatIndex, messages),
+                      myName,
+                    );
+                  } catch (exportError) {
+                    setError(
+                      exportError instanceof Error
+                        ? exportError.message
+                        : "HTML-Export fehlgeschlagen.",
+                    );
+                  } finally {
+                    setExporting(false);
+                  }
+                }}
+              >
+                {exporting ? "Export…" : "HTML-Archiv"}
+              </button>
+            </div>
+          </div>
         </header>
 
-        {!exportData ? (
-          <>
-            <LocalChatList
-              onExportLoaded={handleExportLoaded}
-              onError={setError}
-              onLoadingChange={setLoading}
-            />
+        <section className="mb-3 shrink-0 rounded-2xl bg-white/90 p-3 shadow-sm sm:p-4">
+          <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">Dein Name</span>
+              <select
+                value={myName}
+                onChange={(event) => setMyName(event.target.value)}
+                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+              >
+                {chatIndex.participants.map((participant) => (
+                  <option key={participant} value={participant}>
+                    {participant}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-            <div className="my-6 flex items-center gap-4">
-              <div className="h-px flex-1 bg-black/10" />
-              <span className="text-sm text-[var(--wa-muted)]">oder neu importieren</span>
-              <div className="h-px flex-1 bg-black/10" />
-            </div>
-
-            <UploadZone
-              onExportLoaded={handleExportLoaded}
-              onError={setError}
-              onLoadingChange={setLoading}
-            />
-
-            <section className="mt-6 rounded-3xl border border-black/10 bg-white/80 p-6">
-              <h2 className="text-lg font-semibold text-[var(--wa-text)]">
-                Sind Sprachnachrichten im Export dabei?
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-[var(--wa-muted)]">
-                Ja, wenn du beim Export <strong>„Medien anhängen“</strong> wählst. Sprachnachrichten
-                landen meist als <code>.opus</code> oder <code>.m4a</code> Dateien (oft mit{" "}
-                <code>PTT</code> im Dateinamen) und lassen sich hier direkt abspielen.
-              </p>
-            </section>
-          </>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <section className="rounded-3xl bg-white/90 p-5 shadow-sm">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <p className="text-sm text-[var(--wa-muted)]">Geladen: {sourceLabel}</p>
-                  <h2 className="text-2xl font-semibold text-[var(--wa-text)]">
-                    {exportData.chatTitle}
-                  </h2>
-                  <p className="mt-1 text-sm text-[var(--wa-muted)]">
-                    {exportData.messages.length.toLocaleString("de-DE")} Nachrichten ·{" "}
-                    {exportData.participants.length} Teilnehmer
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    className="rounded-full border border-black/10 px-4 py-2 text-sm font-medium"
-                    onClick={() => {
-                      setExportData(null);
-                      setSourceLabel("");
-                      setError("");
-                    }}
-                  >
-                    Anderen Export laden
-                  </button>
-                  <button
-                    type="button"
-                    disabled={exporting || !myName}
-                    className="rounded-full bg-[var(--wa-accent)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={async () => {
-                      if (!exportData || !myName) return;
-                      setExporting(true);
-                      try {
-                        await downloadHtmlArchive(exportData, myName);
-                      } finally {
-                        setExporting(false);
-                      }
-                    }}
-                  >
-                    {exporting ? "Export läuft…" : "HTML-Archiv herunterladen"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-3">
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-[var(--wa-text)]">
-                    Dein Name im Export
-                  </span>
-                  <select
-                    value={myName}
-                    onChange={(event) => setMyName(event.target.value)}
-                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm"
-                  >
-                    {exportData.participants.map((participant) => (
-                      <option key={participant} value={participant}>
-                        {participant}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block md:col-span-2">
-                  <span className="mb-2 block text-sm font-medium text-[var(--wa-text)]">
-                    Suche
-                  </span>
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Nach Text, Namen oder Dateinamen suchen…"
-                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm"
-                  />
-                </label>
-              </div>
-
-              {stats && (
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <StatBadge label="Bilder" value={stats.images} />
-                  <StatBadge label="Videos" value={stats.videos} />
-                  <StatBadge label="Audio" value={stats.audio} />
-                  <StatBadge label="Sprachnachrichten" value={stats.voice} />
-                  <StatBadge label="Dokumente" value={stats.documents} />
-                  {stats.omitted > 0 && (
-                    <StatBadge label="Medien nicht im Export" value={stats.omitted} muted />
-                  )}
-                  {stats.missing > 0 && (
-                    <StatBadge label="Dateien fehlen" value={stats.missing} muted />
-                  )}
-                </div>
-              )}
-            </section>
-
-            <ChatViewer
-              exportData={exportData}
-              options={{ myName, searchQuery }}
-            />
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">Suche</span>
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Nach Text, Namen oder Dateinamen suchen…"
+                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+              />
+            </label>
           </div>
-        )}
 
-        {(loading || error) && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-6 flex justify-center px-4">
-            <div className="rounded-full bg-[#111b21] px-5 py-3 text-sm text-white shadow-lg">
-              {loading ? "Export wird gelesen…" : error}
+          {stats && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatBadge label="Bilder" value={stats.images} />
+              <StatBadge label="Videos" value={stats.videos} />
+              <StatBadge label="Audio" value={stats.audio} />
+              <StatBadge label="Sprachnachrichten" value={stats.voice} />
             </div>
-          </div>
-        )}
+          )}
+        </section>
+
+        <ChatViewer
+          chatIndex={chatIndex}
+          exportData={exportData}
+          myName={myName}
+          searchQuery={searchQuery}
+        />
+
+        {(loading || error) && <StatusToast loading={loading} error={error} />}
+      </div>
+    </div>
+  );
+}
+
+function StatusToast({ loading, error }: { loading: boolean; error: string }) {
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+      <div className="rounded-full bg-[#111b21] px-5 py-3 text-sm text-white shadow-lg">
+        {loading ? "Chat wird geladen…" : error}
       </div>
     </div>
   );

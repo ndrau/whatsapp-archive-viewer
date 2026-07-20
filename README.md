@@ -33,10 +33,10 @@ chats/
 Vor dem Start werden die Chats lokal geparst und in JSON überführt:
 
 ```bash
-npm run build:chats
+pnpm run build:chats
 ```
 
-Das passiert automatisch bei `npm run dev` und `npm run build`. In der App kannst du die Chats auch per Button **Chats neu bauen** aktualisieren.
+Das passiert automatisch bei `pnpm run dev` und `pnpm run build`. In der App kannst du die Chats auch per Button **Chats neu bauen** aktualisieren.
 
 Optional pro Chat in `meta.json`:
 
@@ -52,8 +52,8 @@ Hinweis: `chats/` (Quellen) und `.built/` (Build-Ausgabe) sind in `.gitignore`.
 ## Start
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 Dann [http://localhost:3000](http://localhost:3000) öffnen.

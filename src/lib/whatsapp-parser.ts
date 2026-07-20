@@ -1,4 +1,5 @@
 import { getMediaKind } from "@/lib/media-types";
+import { extractEditedMarker } from "@/lib/message-meta";
 import type { ChatMessage, ParsedAttachment } from "@/types/whatsapp";
 
 const INVISIBLE_CHARS = /[\u200e\u200f\ufeff\u202a-\u202e]/g;
@@ -170,12 +171,14 @@ function createMessage(
   participants.add(sender);
 
   const { text, attachment } = splitMessageContent(content);
+  const editedMeta = extractEditedMarker(text);
 
   return {
     id: `msg-${index}`,
     date: parseDate(datePart, timePart),
     sender,
-    text,
+    text: editedMeta.text,
+    edited: editedMeta.edited || undefined,
     attachment,
   };
 }
@@ -218,7 +221,9 @@ export function parseWhatsAppChat(text: string, sourceName = "_chat.txt") {
         current.text = current.text ? `${current.text}\n${extra}` : extra;
 
         const resplit = splitMessageContent(current.text);
-        current.text = resplit.text;
+        const editedMeta = extractEditedMarker(resplit.text);
+        current.text = editedMeta.text;
+        if (editedMeta.edited) current.edited = true;
         if (resplit.attachment && !current.attachment) {
           current.attachment = resplit.attachment;
         }

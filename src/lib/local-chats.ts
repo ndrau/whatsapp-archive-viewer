@@ -1,8 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 
-import { readBuiltChat, readBuiltManifest } from "@/lib/build-chats";
-import { parseWhatsAppChat } from "@/lib/whatsapp-parser";
+import { readBuiltChatIndex } from "@/lib/chat-store";
 
 const CHATS_DIR = path.join(process.cwd(), "chats");
 
@@ -39,6 +38,7 @@ export function resolveChatDirectory(slug: string): string {
 }
 
 export async function listLocalChats(): Promise<LocalChatSummary[]> {
+  const { readBuiltManifest } = await import("@/lib/build-chats");
   const manifest = await readBuiltManifest();
 
   if (manifest) {
@@ -55,36 +55,21 @@ export async function listLocalChats(): Promise<LocalChatSummary[]> {
 }
 
 export async function readLocalChat(slug: string) {
-  const built = await readBuiltChat(slug);
+  const index = await readBuiltChatIndex(slug);
 
-  if (built) {
-    return {
-      slug: built.slug,
-      chatTitle: built.title,
-      defaultMyName: built.defaultMyName,
-      participants: built.participants,
-      mediaFiles: built.mediaFiles,
-      messages: built.messages.map((message) => ({
-        ...message,
-        date: new Date(message.date),
-      })),
-    };
+  if (!index) {
+    throw new Error("Chat-Index nicht gefunden.");
   }
 
-  const chatDir = resolveChatDirectory(slug);
-  const chatFile = path.join(chatDir, "_chat.txt");
-  const text = await fs.readFile(chatFile, "utf-8");
-  const parsed = parseWhatsAppChat(text, "_chat.txt");
-  const mediaFiles = (await fs.readdir(chatDir)).filter(
-    (file) => !["_chat.txt", "meta.json", "chat.json", "manifest.json"].includes(file) && !file.startsWith("."),
-  );
-
   return {
-    slug,
-    chatTitle: parsed.chatTitle,
-    participants: parsed.participants,
-    mediaFiles,
-    messages: parsed.messages,
+    slug: index.slug,
+    chatTitle: index.title,
+    defaultMyName: index.defaultMyName,
+    participants: index.participants,
+    mediaFiles: index.mediaFiles,
+    messageCount: index.messageCount,
+    days: index.days,
+    chunks: index.chunks,
   };
 }
 

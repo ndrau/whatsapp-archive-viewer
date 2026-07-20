@@ -1,20 +1,33 @@
 import { promises as fs } from "fs";
 import path from "path";
 
+import { chunkIdFromDate, dayKeyFromDate } from "@/lib/chat-day";
 import { parseWhatsAppChat } from "@/lib/whatsapp-parser";
 import {
-  BUILT_CHAT_FILE,
+  BUILT_CHUNKS_DIR,
+  BUILT_INDEX_FILE,
   BUILT_MANIFEST_FILE,
+  BUILT_SEARCH_FILE,
   CHAT_META_FILE,
-  type BuiltChatData,
+  type BuiltChatIndex,
   type BuiltChatManifest,
   type BuiltChatManifestEntry,
+  type BuiltDayIndex,
+  type BuiltMessageRecord,
+  type BuiltSearchEntry,
 } from "@/types/built-chat";
 
 const SOURCE_CHATS_DIR = path.join(process.cwd(), "chats");
 const BUILT_CHATS_DIR = path.join(process.cwd(), ".built", "chats");
 const SOURCE_FILE = "_chat.txt";
-const SOURCE_IGNORED_FILES = new Set([SOURCE_FILE, CHAT_META_FILE, BUILT_CHAT_FILE, "manifest.json"]);
+const SOURCE_IGNORED_FILES = new Set([
+  SOURCE_FILE,
+  CHAT_META_FILE,
+  BUILT_INDEX_FILE,
+  BUILT_SEARCH_FILE,
+  BUILT_MANIFEST_FILE,
+  BUILT_CHUNKS_DIR,
+]);
 
 export interface ChatMeta {
   title?: string;
@@ -31,10 +44,6 @@ export function getSourceChatsDirectory(): string {
 
 export function getBuiltChatsDirectory(): string {
   return BUILT_CHATS_DIR;
-}
-
-function getBuiltChatPath(slug: string): string {
-  return path.join(BUILT_CHATS_DIR, slug, BUILT_CHAT_FILE);
 }
 
 function titleFromSlug(slug: string): string {
@@ -60,7 +69,58 @@ async function listSourceMediaFiles(sourceDir: string): Promise<string[]> {
   return files.filter((file) => !SOURCE_IGNORED_FILES.has(file) && !file.startsWith("."));
 }
 
-export async function buildChat(slug: string): Promise<BuiltChatData> {
+function serializeMessage(message: {
+  id: string;
+  date: Date;
+  sender: string;
+  text: string;
+  edited?: boolean;
+  attachment?: BuiltMessageRecord["attachment"];
+}): BuiltMessageRecord {
+  return {
+    id: message.id,
+    date: message.date.toISOString(),
+    sender: message.sender,
+    text: message.text,
+    edited: message.edited,
+    attachment: message.attachment,
+  };
+}
+
+function buildDayIndex(messages: BuiltMessageRecord[]): BuiltDayIndex[] {
+  const days: BuiltDayIndex[] = [];
+
+  for (const message of messages) {
+    const date = new Date(message.date);
+    const key = dayKeyFromDate(date);
+    const lastDay = days.at(-1);
+
+    if (!lastDay || lastDay.key !== key) {
+      days.push({
+        key,
+        date: new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString(),
+        messageCount: 1,
+        chunkId: chunkIdFromDate(date),
+      });
+    } else {
+      lastDay.messageCount += 1;
+    }
+  }
+
+  return days;
+}
+
+function buildSearchEntries(messages: BuiltMessageRecord[]): BuiltSearchEntry[] {
+  return messages.map((message) => ({
+    id: message.id,
+    date: message.date,
+    sender: message.sender,
+    text: message.text,
+    attachment: message.attachment?.filename,
+  }));
+}
+
+export async function buildChat(slug: string): Promise<BuiltChatIndex> {
   const sourceDir = path.join(SOURCE_CHATS_DIR, slug);
   const sourcePath = path.join(sourceDir, SOURCE_FILE);
   const [text, mediaFiles, meta] = await Promise.all([
@@ -72,8 +132,46 @@ export async function buildChat(slug: string): Promise<BuiltChatData> {
   const parsed = parseWhatsAppChat(text, SOURCE_FILE);
   const builtAt = new Date().toISOString();
   const title = meta.title ?? parsed.chatTitle ?? titleFromSlug(slug);
+  const messages = parsed.messages.map(serializeMessage);
+  const days = buildDayIndex(messages);
 
-  const built: BuiltChatData = {
+  const chunkMap = new Map<string, BuiltMessageRecord[]>();
+  for (const message of messages) {
+    const chunkId = chunkIdFromDate(new Date(message.date));
+    const bucket = chunkMap.get(chunkId);
+    if (bucket) bucket.push(message);
+    else chunkMap.set(chunkId, [message]);
+  }
+
+  const builtDir = path.join(BUILT_CHATS_DIR, slug);
+  const chunksDir = path.join(builtDir, BUILT_CHUNKS_DIR);
+  await fs.mkdir(chunksDir, { recursive: true });
+
+  const chunks = [...chunkMap.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, chunkMessages]) => {
+      const file = `${BUILT_CHUNKS_DIR}/${id}.json`;
+      return {
+        id,
+        file,
+        messageCount: chunkMessages.length,
+        startDate: chunkMessages[0].date,
+        endDate: chunkMessages.at(-1)!.date,
+        messages: chunkMessages,
+      };
+    });
+
+  await Promise.all(
+    chunks.map((chunk) =>
+      fs.writeFile(
+        path.join(builtDir, chunk.file),
+        `${JSON.stringify({ id: chunk.id, messages: chunk.messages }, null, 2)}\n`,
+        "utf-8",
+      ),
+    ),
+  );
+
+  const index: BuiltChatIndex = {
     slug,
     title,
     builtAt,
@@ -82,20 +180,33 @@ export async function buildChat(slug: string): Promise<BuiltChatData> {
     participants: parsed.participants,
     defaultMyName: meta.defaultMyName,
     mediaFiles,
-    messages: parsed.messages.map((message) => ({
-      id: message.id,
-      date: message.date.toISOString(),
-      sender: message.sender,
-      text: message.text,
-      attachment: message.attachment,
+    messageCount: messages.length,
+    days,
+    chunks: chunks.map(({ id, file, messageCount, startDate, endDate }) => ({
+      id,
+      file,
+      messageCount,
+      startDate,
+      endDate,
     })),
   };
 
-  const builtDir = path.join(BUILT_CHATS_DIR, slug);
-  await fs.mkdir(builtDir, { recursive: true });
-  await fs.writeFile(getBuiltChatPath(slug), `${JSON.stringify(built, null, 2)}\n`, "utf-8");
+  const search = { entries: buildSearchEntries(messages) };
 
-  return built;
+  await fs.writeFile(
+    path.join(builtDir, BUILT_INDEX_FILE),
+    `${JSON.stringify(index, null, 2)}\n`,
+    "utf-8",
+  );
+  await fs.writeFile(
+    path.join(builtDir, BUILT_SEARCH_FILE),
+    `${JSON.stringify(search)}\n`,
+    "utf-8",
+  );
+
+  await fs.rm(path.join(builtDir, "chat.json"), { force: true });
+
+  return index;
 }
 
 export async function buildAllChats(): Promise<BuiltChatManifest> {
@@ -123,7 +234,7 @@ export async function buildAllChats(): Promise<BuiltChatManifest> {
     chats.push({
       slug: built.slug,
       title: built.title,
-      messageCount: built.messages.length,
+      messageCount: built.messageCount,
       mediaCount: built.mediaFiles.length,
       participants: built.participants,
       builtAt: built.builtAt,
@@ -154,15 +265,6 @@ async function cleanupStaleBuiltChats(activeSlugs: Set<string>) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     if (activeSlugs.has(entry.name)) continue;
     await fs.rm(path.join(BUILT_CHATS_DIR, entry.name), { recursive: true, force: true });
-  }
-}
-
-export async function readBuiltChat(slug: string): Promise<BuiltChatData | null> {
-  try {
-    const raw = await fs.readFile(getBuiltChatPath(slug), "utf-8");
-    return JSON.parse(raw) as BuiltChatData;
-  } catch {
-    return null;
   }
 }
 
