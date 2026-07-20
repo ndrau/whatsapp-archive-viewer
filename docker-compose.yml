@@ -41,5 +41,6 @@ services:
       - /mnt/tank/apps/whatsapp-archive/data:/app/chats
       # Dataset built — Index, Suche, Upload-Jobs (neu generierbar)
       - /mnt/tank/apps/whatsapp-archive/built:/app/.built
-    # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
-    # user: "0:0"
+    # TrueNAS-Datasets sind oft root-owned → sonst EACCES auf /app/.built
+    # Alternativ auf dem Host: chown -R 1001:1001 data built  und user-Zeile entfernen
+    user: "0:0"

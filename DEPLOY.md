@@ -33,11 +33,25 @@ Portainer braucht **kein** Git auf dem NAS — nur Compose + Image-URL.
 ## Datasets anlegen
 
 ```text
-…/whatsapp-archive/data/    ← schreibbar (UID 1001 oder user: "0:0")
+…/whatsapp-archive/data/    ← schreibbar, darf leer starten
 …/whatsapp-archive/built/   ← schreibbar, darf leer starten
 ```
 
 In der Compose die linken Pfade auf deine echten Dataset-Pfade setzen.
+
+### Rechte (wichtig)
+
+Ohne Schreibrechte: `EACCES: permission denied, mkdir '/app/.built/chats'`.
+
+**Einfach (Default in Compose):** `user: "0:0"` — Container läuft als root und darf in die Datasets schreiben.
+
+**Strenger:** Compose-`user`-Zeile entfernen und auf dem NAS:
+
+```bash
+chown -R 1001:1001 /mnt/…/whatsapp-archive/data /mnt/…/whatsapp-archive/built
+```
+
+(UID 1001 = User `nextjs` im Image.)
 
 ## Image
 
