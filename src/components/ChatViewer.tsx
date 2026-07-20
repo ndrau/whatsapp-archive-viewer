@@ -45,7 +45,10 @@ type PendingScroll = {
 };
 
 const SIZE_BUFFER = 6;
-/** Uniform visual gap between every chat row (virtualizer `gap`). */
+/**
+ * Uniform space after every row. Must live inside the measured row (padding),
+ * not as virtualizer `gap` — otherwise estimate/measure drift shows as uneven gaps.
+ */
 const ROW_GAP_PX = 10;
 const TEXT_LINE_HEIGHT = 22;
 /** ~bubble content width; slight over-estimate is OK, sticky oversize is not. */
@@ -95,8 +98,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const scrubbingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const lastScrollTimeRef = useRef(0);
-  /** Skip ResizeObserver→resize cascades while the user is actively scrolling or a prepend is settling. */
-  const freezeRowMeasureRef = useRef(false);
   const lastPreviewDayKeyRef = useRef<string | undefined>(undefined);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -202,29 +203,19 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => estimateRowSize(rows[index]),
+    // Gap is padding inside each row — include it in the estimate too.
+    estimateSize: (index) => estimateRowSize(rows[index]) + ROW_GAP_PX,
     overscan: 12,
-    gap: ROW_GAP_PX,
+    gap: 0,
     getItemKey: (index) => rows[index]?.id ?? index,
     useScrollendEvent: true,
     isScrollingResetDelay: 150,
-    // Always prefer the real DOM height. Sticky Math.max(estimate, measured) left
-    // oversized slots (uneven gaps) after voice/text rows. Only during prepend
-    // settle do we avoid shrinking below the current cache for a few frames.
     measureElement: (element, _entry, instance) => {
       const measured = Math.round((element as HTMLElement).offsetHeight);
       if (!Number.isFinite(measured) || measured <= 0) {
         const index = instance.indexFromElement(element);
         return instance.options.estimateSize(index);
       }
-
-      if (freezeRowMeasureRef.current) {
-        const index = instance.indexFromElement(element);
-        const key = instance.options.getItemKey(index);
-        const cached = instance.itemSizeCache.get(key);
-        if (cached !== undefined) return Math.max(cached, measured);
-      }
-
       return measured;
     },
   });
@@ -236,15 +227,12 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
     scrollAnchorRef.current = null;
     container.scrollTop = anchor.top + (container.scrollHeight - anchor.height);
-    // Freeze only briefly so RO cannot fight the anchor — then remeasure.
-    // Must not wait for another scroll event (prepend often happens on scroll-idle).
-    freezeRowMeasureRef.current = true;
-    const unfreezeTimer = window.setTimeout(() => {
-      freezeRowMeasureRef.current = false;
-      rowVirtualizer.measure();
-    }, 120);
-    return () => window.clearTimeout(unfreezeTimer);
-  }, [messages, rowVirtualizer]);
+  }, [messages]);
+
+  // Remeasure after row set changes so padding-bottom gaps stay exact.
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+  }, [rows, rowVirtualizer]);
 
   const previewTimelineDay = useCallback(
     (dayKey?: string) => {
@@ -520,7 +508,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (!fromDay || !toDay || nextStart === start) return false;
 
         extendLoadingRef.current = true;
-        freezeRowMeasureRef.current = true;
 
         if (container) {
           scrollAnchorRef.current = {
@@ -550,7 +537,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           return true;
         } catch (error) {
           console.error("Ältere Nachrichten konnten nicht geladen werden.", error);
-          freezeRowMeasureRef.current = false;
           scrollAnchorRef.current = null;
           return false;
         } finally {
@@ -658,8 +644,6 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           setActiveDayKey(activeDayRef.current);
         }
 
-        // After scroll settles: allow real measurements once, then optionally extend.
-        freezeRowMeasureRef.current = false;
         rowVirtualizer.measure();
 
         if (performance.now() >= jumpLockUntilRef.current) {
@@ -838,6 +822,7 @@ const VirtualChatRows = function VirtualChatRows({
             className="virtual-chat-row absolute left-0 top-0 w-full"
             style={{
               transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+              paddingBottom: ROW_GAP_PX,
             }}
           >
             {row.kind === "day-header" && (

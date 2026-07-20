@@ -50,10 +50,6 @@ code {
   -webkit-overflow-scrolling: touch;
 }
 
-.virtual-chat-row {
-  contain: layout style;
-}
-
 .chat-scroll::-webkit-scrollbar {
   display: none;
 }
