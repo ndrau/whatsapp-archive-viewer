@@ -47,8 +47,7 @@ function LoginForm() {
           <p className="text-sm uppercase tracking-[0.24em] text-white/70">WhatsApp Archiv</p>
           <h1 className="mt-2 text-3xl font-semibold">Login</h1>
           <p className="mt-3 text-sm leading-6 text-white/85">
-            Geschützter Bereich — bitte Passwort eingeben. Die Anmeldung gilt bis Mitternacht
-            (Europe/Berlin).
+            Geschützter Bereich — bitte Passwort eingeben.
           </p>
         </div>
 
