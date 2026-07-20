@@ -12,28 +12,35 @@ export type ChatDisplayItem =
       id: string;
       sender: string;
       date: Date;
+      caption?: string;
       messages: ChatMessage[];
       items: MediaGalleryItem[];
     };
 
-const GROUP_WINDOW_MS = 2 * 60 * 1000;
+const ALBUM_WINDOW_MS = 30_000;
 
-function isGridMedia(message: ChatMessage): boolean {
+function hasGroupableMedia(message: ChatMessage): boolean {
   const attachment = message.attachment;
   if (!attachment || attachment.omitted || !attachment.filename) return false;
 
-  return (
-    (attachment.kind === "image" || attachment.kind === "video") &&
-    message.text.trim().length === 0
-  );
+  return attachment.kind === "image" || attachment.kind === "video";
 }
 
-function canJoinMediaGroup(previous: ChatMessage, next: ChatMessage): boolean {
+function canJoinAlbumGroup(previous: ChatMessage, next: ChatMessage): boolean {
   if (previous.sender !== next.sender) return false;
-  if (!isGridMedia(next)) return false;
+  if (!hasGroupableMedia(next)) return false;
 
   const delta = Math.abs(new Date(next.date).getTime() - new Date(previous.date).getTime());
-  return delta <= GROUP_WINDOW_MS;
+  return delta <= ALBUM_WINDOW_MS;
+}
+
+function collectAlbumCaption(groupMessages: ChatMessage[]): string | undefined {
+  for (const message of groupMessages) {
+    const text = message.text.trim();
+    if (text) return text;
+  }
+
+  return undefined;
 }
 
 export function buildDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
@@ -43,12 +50,12 @@ export function buildDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
   while (index < messages.length) {
     const message = messages[index];
 
-    if (isGridMedia(message)) {
+    if (hasGroupableMedia(message)) {
       const groupMessages = [message];
       let cursor = index + 1;
 
-      while (cursor < messages.length && canJoinMediaGroup(groupMessages.at(-1)!, messages[cursor])) {
-        groupMessages.push(messages[cursor]);
+      while (cursor < messages.length && canJoinAlbumGroup(groupMessages.at(-1)!, messages[cursor]!)) {
+        groupMessages.push(messages[cursor]!);
         cursor += 1;
       }
 
@@ -58,9 +65,13 @@ export function buildDisplayItems(messages: ChatMessage[]): ChatDisplayItem[] {
           id: groupMessages.map((entry) => entry.id).join("-"),
           sender: message.sender,
           date: groupMessages.at(-1)!.date,
+          caption: collectAlbumCaption(groupMessages),
           messages: groupMessages,
           items: groupMessages
-            .filter((entry) => entry.attachment && !entry.attachment.omitted && entry.attachment.filename)
+            .filter(
+              (entry) =>
+                entry.attachment && !entry.attachment.omitted && entry.attachment.filename,
+            )
             .map((entry) => ({
               messageId: entry.id,
               attachment: entry.attachment!,

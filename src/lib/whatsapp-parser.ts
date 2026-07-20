@@ -30,6 +30,12 @@ const ATTACHMENT_PATTERNS: Array<{ regex: RegExp; omitted?: boolean }> = [
 const MEDIA_FILENAME =
   /^.+\.(jpg|jpeg|png|gif|webp|heic|mp4|mov|3gp|opus|ogg|m4a|aac|mp3|amr|pdf|vcf)$/i;
 
+const OMITTED_TEXT_SUFFIX =
+  /\s*(?:‎)?(?:Bild weggelassen|image omitted|Video weggelassen|video omitted|Audiodatei weggelassen|Sprachnachricht weggelassen|audio omitted|Sticker weggelassen|sticker omitted|Mediendatei ausgeschlossen|media omitted|\(file attached\))\s*$/i;
+
+const MERGE_WINDOW_MS = 2_000;
+const DUPLICATE_CAPTION_WINDOW_MS = 3_000;
+
 function cleanText(value: string): string {
   return value.replace(INVISIBLE_CHARS, "").trim();
 }
@@ -189,6 +195,100 @@ function inferChatTitle(filename: string): string {
   return match?.[1]?.trim() || "WhatsApp Chat";
 }
 
+function stripOmittedTextSuffix(text: string): string {
+  return cleanText(text.replace(OMITTED_TEXT_SUFFIX, ""));
+}
+
+function isEmptyMessage(message: ChatMessage): boolean {
+  return !message.text.trim() && !message.attachment;
+}
+
+function isAttachmentOnly(message: ChatMessage): boolean {
+  return Boolean(message.attachment) && !message.text.trim();
+}
+
+function isTextOnly(message: ChatMessage): boolean {
+  return Boolean(message.text.trim()) && !message.attachment;
+}
+
+function timeDeltaMs(previous: ChatMessage, next: ChatMessage): number {
+  return Math.abs(next.date.getTime() - previous.date.getTime());
+}
+
+function mergeSplitMessages(into: ChatMessage, from: ChatMessage): ChatMessage {
+  const text = stripOmittedTextSuffix(into.text.trim() || from.text.trim());
+
+  return {
+    ...into,
+    date: into.date,
+    text,
+    attachment: into.attachment ?? from.attachment,
+    edited: into.edited || from.edited,
+  };
+}
+
+function consolidateSplitMessages(messages: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const previous = result.at(-1);
+
+    if (
+      previous &&
+      previous.sender === message.sender &&
+      timeDeltaMs(previous, message) <= MERGE_WINDOW_MS
+    ) {
+      if (isTextOnly(previous) && isAttachmentOnly(message)) {
+        result[result.length - 1] = mergeSplitMessages(previous, message);
+        continue;
+      }
+
+      if (isAttachmentOnly(previous) && isTextOnly(message)) {
+        result[result.length - 1] = mergeSplitMessages(message, previous);
+        continue;
+      }
+    }
+
+    result.push(message);
+  }
+
+  return result;
+}
+
+function stripDuplicateCaptions(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message, index) => {
+    if (!message.text.trim() || !message.attachment) {
+      return message;
+    }
+
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = messages[cursor];
+      if (previous.sender !== message.sender) break;
+      if (timeDeltaMs(previous, message) > DUPLICATE_CAPTION_WINDOW_MS) break;
+
+      if (previous.text.trim() === message.text.trim()) {
+        return { ...message, text: "" };
+      }
+    }
+
+    return message;
+  });
+}
+
+function reindexMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message, index) => ({
+    ...message,
+    id: `msg-${index}`,
+  }));
+}
+
+export function consolidateMessages(messages: ChatMessage[]): ChatMessage[] {
+  const withoutEmpty = messages.filter((message) => !isEmptyMessage(message));
+  const merged = consolidateSplitMessages(withoutEmpty);
+  const normalized = stripDuplicateCaptions(merged);
+  return reindexMessages(normalized);
+}
+
 export function parseWhatsAppChat(text: string, sourceName = "_chat.txt") {
   const normalizedText = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const lines = normalizedText.split("\n");
@@ -233,7 +333,7 @@ export function parseWhatsAppChat(text: string, sourceName = "_chat.txt") {
 
   return {
     chatTitle: inferChatTitle(sourceName),
-    messages,
+    messages: consolidateMessages(messages),
     participants: [...participants].sort((a, b) => a.localeCompare(b, "de")),
   };
 }

@@ -44,7 +44,10 @@ type PendingScroll = {
   align?: "start" | "center" | "end";
 };
 
-const SIZE_BUFFER = 12;
+const SIZE_BUFFER = 4;
+const ROW_GAP_PX = 16;
+const TEXT_LINE_HEIGHT = 24;
+const TEXT_CHARS_PER_LINE = 56;
 const SCROLL_IDLE_MS = 220;
 const EXTEND_EDGE_PX = 480;
 const HANDLE_HIDE_MS = 1800;
@@ -82,41 +85,48 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
   const estimateRowSize = useCallback(
     (row: VirtualChatRow | undefined): number => {
-      if (!row) return 92 + SIZE_BUFFER;
+      if (!row) return 72 + SIZE_BUFFER;
 
-      const ROW_GAP = 12;
-      if (row.kind === "day-header") return 48 + ROW_GAP + SIZE_BUFFER;
-      if (row.kind === "search-result") return 96 + ROW_GAP + SIZE_BUFFER;
+      if (row.kind === "day-header") return 36 + SIZE_BUFFER;
+      if (row.kind === "search-result") return 84 + SIZE_BUFFER;
 
       if (row.kind === "display-item") {
         if (row.item.kind === "media-group") {
           const count = row.item.items.length;
-          const header = row.item.sender === myName ? 0 : 24;
-          const footer = 24;
+          const header = row.item.sender === myName ? 0 : 22;
+          const footer = 20;
           const bubble = 16;
-          if (count === 1) return header + 256 + footer + bubble + ROW_GAP + SIZE_BUFFER;
-          if (count === 2) return header + 170 + footer + bubble + ROW_GAP + SIZE_BUFFER;
-          return header + 330 + footer + bubble + ROW_GAP + SIZE_BUFFER;
+          const captionLines = row.item.caption
+            ? Math.ceil(row.item.caption.length / TEXT_CHARS_PER_LINE)
+            : 0;
+          const captionHeight = captionLines * TEXT_LINE_HEIGHT;
+
+          if (count === 1) return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
+          if (count === 2) return header + 170 + captionHeight + footer + bubble + SIZE_BUFFER;
+          return header + 330 + captionHeight + footer + bubble + SIZE_BUFFER;
         }
 
         const message = row.item.message;
         const attachment = message.attachment;
-        const header = message.sender === myName ? 0 : 24;
-        const footer = 24;
+        const header = message.sender === myName ? 0 : 22;
+        const footer = 20;
         const bubble = 16;
 
         if (attachment?.kind === "image" || attachment?.kind === "video" || attachment?.kind === "sticker") {
-          return header + 256 + footer + bubble + ROW_GAP + SIZE_BUFFER;
+          const captionLines = message.text.trim()
+            ? Math.ceil(message.text.length / TEXT_CHARS_PER_LINE)
+            : 0;
+          return header + 256 + captionLines * TEXT_LINE_HEIGHT + footer + bubble + SIZE_BUFFER;
         }
         if (attachment?.kind === "audio") {
-          return header + 88 + footer + bubble + ROW_GAP + SIZE_BUFFER;
+          return header + 88 + footer + bubble + SIZE_BUFFER;
         }
 
-        const lineCount = Math.max(1, Math.ceil(message.text.length / 34));
-        return header + 24 + lineCount * 24 + footer + bubble + ROW_GAP + SIZE_BUFFER;
+        const lineCount = Math.max(1, Math.ceil(message.text.length / TEXT_CHARS_PER_LINE));
+        return header + bubble + lineCount * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
       }
 
-      return 92 + SIZE_BUFFER;
+      return 72 + SIZE_BUFFER;
     },
     [myName],
   );
@@ -151,7 +161,14 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateRowSize(rows[index]),
     overscan: 8,
+    gap: ROW_GAP_PX,
+    getItemKey: (index) => rows[index]?.id ?? index,
+    measureElement: (element) => element.getBoundingClientRect().height,
   });
+
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+  }, [messages, rowVirtualizer]);
 
   useLayoutEffect(() => {
     const anchor = scrollAnchorRef.current;
@@ -683,9 +700,10 @@ const VirtualChatRows = function VirtualChatRows({
         return (
           <div
             key={row.id}
-            className="virtual-chat-row absolute left-0 top-0 w-full pb-3"
+            ref={rowVirtualizer.measureElement}
+            data-index={virtualRow.index}
+            className="virtual-chat-row absolute left-0 top-0 w-full"
             style={{
-              minHeight: `${virtualRow.size}px`,
               transform: `translate3d(0, ${virtualRow.start}px, 0)`,
             }}
           >
@@ -702,6 +720,7 @@ const VirtualChatRows = function VirtualChatRows({
                 <MediaGroupBubble
                   sender={row.item.sender}
                   date={row.item.date}
+                  caption={row.item.caption}
                   items={row.item.items}
                   exportData={exportData}
                   isOutgoing={row.item.sender === myName}

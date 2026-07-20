@@ -49,6 +49,21 @@ Optional pro Chat in `meta.json`:
 
 Hinweis: `chats/` (Quellen) und `.built/` (Build-Ausgabe) sind in `.gitignore`.
 
+### Export-Normalisierung
+
+WhatsApp schreibt Medien oft in **mehrere Zeilen** im `_chat.txt` (Caption und Bild getrennt, leere Zeilen vor Alben, wiederholte Captions bei Mehrfachfotos). Beim Chat-Build normalisiert der Parser diese Fälle:
+
+- **Leere Nachrichten** ohne Text und ohne Anhang werden verworfen
+- **Getrennte Zeilen** desselben Senders (≤ 2 s) mit nur Text bzw. nur Anhang werden zu **einer Nachricht** zusammengeführt
+- **Wiederholte Captions** bei Foto-Serien werden entfernt, die Caption bleibt nur einmal
+- **Foto-Alben** (Caption + Bild + weitere Bilder desselben Senders innerhalb von 30 s) werden in der UI als **ein Bubble/Grid** mit Caption oben gerendert
+
+Nach Änderungen am Parser oder an der Gruppierungslogik Chats neu bauen:
+
+```bash
+pnpm run build:chats
+```
+
 ## Start
 
 ```bash

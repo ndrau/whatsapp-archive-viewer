@@ -14,34 +14,15 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${rest.toString().padStart(2, "0")}`;
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
-  return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
-}
-
-function avatarColor(name: string): string {
-  const palette = ["#6a7175", "#7f66ff", "#009de2", "#007bfc", "#ff6b6b", "#00a884", "#8696a0"];
-  let hash = 0;
-  for (let index = 0; index < name.length; index += 1) {
-    hash = (hash << 5) - hash + name.charCodeAt(index);
-    hash |= 0;
-  }
-  return palette[Math.abs(hash) % palette.length];
-}
-
 interface VoiceMessagePlayerProps {
   src: string;
   filename: string;
-  sender: string;
   timestamp: string;
 }
 
 export function VoiceMessagePlayer({
   src,
   filename,
-  sender,
   timestamp,
 }: VoiceMessagePlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -168,88 +149,74 @@ export function VoiceMessagePlayer({
     <div className="voice-message mb-0.5 min-w-[260px] max-w-[340px]">
       <audio ref={audioRef} preload="auto" src={src} className="hidden" />
 
-      <div className="flex items-start gap-2.5">
-        <div className="relative mt-0.5 shrink-0">
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold text-white"
-            style={{ backgroundColor: avatarColor(sender) }}
-          >
-            {initials(sender)}
-          </div>
-          <span className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-white bg-[#8696a0] text-white shadow-sm">
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-2.5 w-2.5 fill-current">
-              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a1 1 0 0 0-1 1 8 8 0 0 0 16 0 1 1 0 0 0-1-1h-2Z" />
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => void togglePlayback()}
+          className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-[#54656f] transition-[background-color,transform] hover:bg-black/8 active:scale-95 active:bg-black/12"
+          aria-label={isPlaying ? "Pause" : "Abspielen"}
+        >
+          {isPlaying ? (
+            <span className="flex gap-[3px]">
+              <span className="block h-4 w-[3px] rounded-sm bg-current" />
+              <span className="block h-4 w-[3px] rounded-sm bg-current" />
+            </span>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="ml-0.5 h-5 w-5 fill-current">
+              <path d="M8 5.14v13.72c0 .79.87 1.27 1.54.84l11.02-6.86a1 1 0 0 0 0-1.7L9.54 4.3A1 1 0 0 0 8 5.14Z" />
             </svg>
-          </span>
-        </div>
+          )}
+        </button>
 
-        <div className="min-w-0 flex-1 pt-0.5">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void togglePlayback()}
-              className="flex h-7 w-7 shrink-0 items-center justify-center text-[#54656f]"
-              aria-label={isPlaying ? "Pause" : "Abspielen"}
-            >
-              {isPlaying ? (
-                <span className="flex gap-[3px]">
-                  <span className="block h-3.5 w-[3px] rounded-sm bg-current" />
-                  <span className="block h-3.5 w-[3px] rounded-sm bg-current" />
-                </span>
-              ) : (
-                <span className="ml-0.5 block h-0 w-0 border-y-[7px] border-l-[11px] border-y-transparent border-l-current" />
-              )}
-            </button>
+        <div className="min-w-0 flex-1">
+          <div
+            ref={waveformRef}
+            role="slider"
+            aria-label="Wiedergabeposition"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(duration)}
+            aria-valuenow={Math.round(currentTime)}
+            tabIndex={0}
+            onClick={(event) => handleSeek(event.clientX)}
+            onKeyDown={(event) => {
+              const audio = audioRef.current;
+              if (!audio || duration <= 0) return;
 
-            <div
-              ref={waveformRef}
-              role="slider"
-              aria-label="Wiedergabeposition"
-              aria-valuemin={0}
-              aria-valuemax={Math.round(duration)}
-              aria-valuenow={Math.round(currentTime)}
-              tabIndex={0}
-              onClick={(event) => handleSeek(event.clientX)}
-              onKeyDown={(event) => {
-                const audio = audioRef.current;
-                if (!audio || duration <= 0) return;
+              if (event.key === "ArrowRight") {
+                audio.currentTime = Math.min(duration, audio.currentTime + 1);
+                setCurrentTime(audio.currentTime);
+              }
+              if (event.key === "ArrowLeft") {
+                audio.currentTime = Math.max(0, audio.currentTime - 1);
+                setCurrentTime(audio.currentTime);
+              }
+            }}
+            className="relative h-7 min-w-0 cursor-pointer"
+          >
+            <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-end gap-[2px]">
+              {waveform.map((peak, index) => {
+                const barProgress = (index + 0.5) / waveform.length;
+                const played = barProgress <= progress;
 
-                if (event.key === "ArrowRight") {
-                  audio.currentTime = Math.min(duration, audio.currentTime + 1);
-                  setCurrentTime(audio.currentTime);
-                }
-                if (event.key === "ArrowLeft") {
-                  audio.currentTime = Math.max(0, audio.currentTime - 1);
-                  setCurrentTime(audio.currentTime);
-                }
-              }}
-              className="relative h-7 min-w-0 flex-1 cursor-pointer"
-            >
-              <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-end gap-[2px]">
-                {waveform.map((peak, index) => {
-                  const barProgress = (index + 0.5) / waveform.length;
-                  const played = barProgress <= progress;
-
-                  return (
-                    <span
-                      key={`${filename}-${index}`}
-                      className={`block w-[2px] rounded-full transition-colors duration-75 ${
-                        played ? "bg-[#667781]" : "bg-[#8696a0]/45"
-                      }`}
-                      style={{ height: `${barHeight(peak)}px` }}
-                    />
-                  );
-                })}
-              </div>
-
-              <span
-                className="pointer-events-none absolute top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#111b21] shadow-sm"
-                style={{ left: `calc(${progress * 100}% - 5px)` }}
-              />
+                return (
+                  <span
+                    key={`${filename}-${index}`}
+                    className={`block w-[2px] rounded-full transition-colors duration-75 ${
+                      played ? "bg-[#667781]" : "bg-[#8696a0]/45"
+                    }`}
+                    style={{ height: `${barHeight(peak)}px` }}
+                  />
+                );
+              })}
             </div>
+
+            <span
+              className="pointer-events-none absolute top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#111b21] shadow-sm"
+              style={{ left: `calc(${progress * 100}% - 5px)` }}
+            />
           </div>
 
-          <div className="mt-0.5 flex items-end justify-between gap-3 pl-9">
+          <div className="mt-0.5 flex items-end justify-between gap-3">
             <span className="text-[11px] leading-none text-[#667781]">
               {formatDuration(displayDuration)}
             </span>

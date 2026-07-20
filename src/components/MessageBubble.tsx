@@ -101,7 +101,6 @@ function MediaAttachment({
         <VoiceMessagePlayer
           src={mediaUrl}
           filename={attachment.filename}
-          sender={message.sender}
           timestamp={timestamp}
         />
       );
@@ -191,6 +190,7 @@ export function MessageBubble({
 interface MediaGroupBubbleProps {
   sender: string;
   date: Date;
+  caption?: string;
   items: MediaGalleryItem[];
   exportData: WhatsAppExport;
   isOutgoing: boolean;
@@ -200,6 +200,7 @@ interface MediaGroupBubbleProps {
 export function MediaGroupBubble({
   sender,
   date,
+  caption,
   items,
   exportData,
   isOutgoing,
@@ -231,6 +232,8 @@ export function MediaGroupBubble({
           exportData={exportData}
           onOpen={(index) => onOpenMedia(items, index)}
         />
+
+        {caption && <MessageText text={caption} />}
 
         <p className="mt-1 text-right text-[11px] text-[var(--wa-muted)]">{timestamp}</p>
       </div>
