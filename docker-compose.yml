@@ -1,12 +1,12 @@
 # TrueNAS / Portainer — App-Image + zwei getrennte Datasets
 #
-# Datasets (Namen wie von dir gewählt):
-#   data  → Chat-Rohdaten / Uploads (persistent, überlebt App-Updates)
-#   app   → generierte Build-Artefakte (Index/JSON, neu baubar)
+# Datasets:
+#   data   → Chat-Rohdaten / Uploads (persistent, überlebt App-Updates)
+#   built  → generierte Build-Artefakte (Index/JSON, neu baubar)
 #
 # Beispiel-Pfade anpassen:
 #   /mnt/tank/apps/whatsapp-archive/data
-#   /mnt/tank/apps/whatsapp-archive/app
+#   /mnt/tank/apps/whatsapp-archive/built
 #
 # Deploy: Portainer Stack → Passwort setzen → Deploy → http://<nas-ip>:3080
 
@@ -26,7 +26,7 @@ services:
       HOSTNAME: "0.0.0.0"
       TZ: Europe/Berlin
       # 1 = beim Start aus data neu bauen (empfohlen nach App-Update / neuem Upload)
-      # 0 = vorhandene Artefakte in app nutzen (schnellerer Start)
+      # 0 = vorhandene Artefakte in built nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"
       # Login — bitte ändern (Secret: openssl rand -base64 32)
       ARCHIVE_PASSWORD: "CHANGE_ME"
@@ -36,7 +36,7 @@ services:
     volumes:
       # Dataset data — WhatsApp-Exporte / UI-Uploads
       - /mnt/tank/apps/whatsapp-archive/data:/app/chats
-      # Dataset app — Index, Suche, Upload-Jobs (neu generierbar)
-      - /mnt/tank/apps/whatsapp-archive/app:/app/.built
+      # Dataset built — Index, Suche, Upload-Jobs (neu generierbar)
+      - /mnt/tank/apps/whatsapp-archive/built:/app/.built
     # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
     # user: "0:0"
