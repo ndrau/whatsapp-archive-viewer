@@ -9,9 +9,6 @@
 | **Dataset `built`** | `…/whatsapp-archive/built` | `/app/.built` | bleibt, oder leer → App baut neu |
 
 ```text
-┌─────────────────────────�/whatsapp-archive/built` | `/app/.built` | bleibt, oder leer → App baut neu |
-
-```text
 ┌─────────────────────────┐
 │  Docker Image (Code)    │  ← Updates nur hier
 └───────────┬─────────────┘
