@@ -8,7 +8,7 @@
 #   /mnt/tank/apps/whatsapp-archive/data
 #   /mnt/tank/apps/whatsapp-archive/built
 #
-# Deploy: Portainer Stack → Passwort setzen → Deploy → http://<nas-ip>:3080
+# Deploy: Portainer Stack → Passwort setzen → Deploy → http://<nas-ip>:9180
 
 services:
   whatsapp-archive:
@@ -19,7 +19,8 @@ services:
     container_name: whatsapp-archive
     restart: unless-stopped
     ports:
-      - "3080:3000"
+      # Host:Container — Host-Port hoch, damit 3000/3080 frei bleiben
+      - "9180:3000"
     environment:
       NODE_ENV: production
       PORT: "3000"
