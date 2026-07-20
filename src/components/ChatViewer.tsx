@@ -43,14 +43,32 @@ type PendingScroll = {
   align?: "start" | "center" | "end";
 };
 
-const SIZE_BUFFER = 4;
+const SIZE_BUFFER = 8;
 const ROW_GAP_PX = 16;
-const TEXT_LINE_HEIGHT = 24;
-const TEXT_CHARS_PER_LINE = 56;
+/** Bubble text is narrower than full chat width — prefer over-estimate over overlap. */
+const TEXT_LINE_HEIGHT = 22;
+const TEXT_CHARS_PER_LINE = 34;
 const SCROLL_IDLE_MS = 220;
 const EXTEND_EDGE_PX = 480;
 const HANDLE_HIDE_MS = 1800;
 const JUMP_LOCK_MS = 750;
+
+/** Count wrapped lines including explicit newlines (WhatsApp multi-line messages). */
+function estimateTextLines(text: string): number {
+  const normalized = text.replace(/\r\n/g, "\n").trimEnd();
+  if (!normalized) return 1;
+
+  let lines = 0;
+  for (const paragraph of normalized.split("\n")) {
+    // Long URLs / unbroken tokens wrap less efficiently than plain prose.
+    const tokenPenalty = paragraph.split(/\s+/).reduce((extra, token) => {
+      if (token.length <= TEXT_CHARS_PER_LINE) return extra;
+      return extra + Math.ceil(token.length / TEXT_CHARS_PER_LINE) - 1;
+    }, 0);
+    lines += Math.max(1, Math.ceil(paragraph.length / TEXT_CHARS_PER_LINE) + tokenPenalty);
+  }
+  return lines;
+}
 
 export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -101,10 +119,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           const header = row.item.sender === myName ? 0 : 22;
           const footer = 20;
           const bubble = 16;
-          const captionLines = row.item.caption
-            ? Math.ceil(row.item.caption.length / TEXT_CHARS_PER_LINE)
+          const captionHeight = row.item.caption
+            ? estimateTextLines(row.item.caption) * TEXT_LINE_HEIGHT
             : 0;
-          const captionHeight = captionLines * TEXT_LINE_HEIGHT;
 
           // Empty group (shouldn't happen) — treat like a short text row.
           if (count === 0) {
@@ -125,23 +142,21 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
         // Omitted / missing media render as a single italic line — never reserve image height.
         if (attachment && (attachment.omitted || !attachment.filename)) {
-          const textLines = message.text.trim()
-            ? Math.ceil(message.text.length / TEXT_CHARS_PER_LINE)
-            : 1;
+          const textLines = message.text.trim() ? estimateTextLines(message.text) : 1;
           return header + bubble + textLines * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
         }
 
         if (attachment?.kind === "image" || attachment?.kind === "video" || attachment?.kind === "sticker") {
-          const captionLines = message.text.trim()
-            ? Math.ceil(message.text.length / TEXT_CHARS_PER_LINE)
+          const captionHeight = message.text.trim()
+            ? estimateTextLines(message.text) * TEXT_LINE_HEIGHT
             : 0;
-          return header + 256 + captionLines * TEXT_LINE_HEIGHT + footer + bubble + SIZE_BUFFER;
+          return header + 256 + captionHeight + footer + bubble + SIZE_BUFFER;
         }
         if (attachment?.kind === "audio") {
           return header + 88 + footer + bubble + SIZE_BUFFER;
         }
 
-        const lineCount = Math.max(1, Math.ceil(message.text.length / TEXT_CHARS_PER_LINE));
+        const lineCount = estimateTextLines(message.text);
         return header + bubble + lineCount * TEXT_LINE_HEIGHT + footer + SIZE_BUFFER;
       }
 
@@ -185,15 +200,23 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     getItemKey: (index) => rows[index]?.id ?? index,
     useScrollendEvent: true,
     isScrollingResetDelay: 180,
-    // During scroll / prepend settle: keep cached/estimated sizes so image loads
-    // and late layout cannot nudge scrollTop (the micro-jerk in the recording).
+    // During scroll / prepend: avoid shrink-driven scroll jumps, but never report a
+    // size smaller than the real DOM height — that caused bubbles to overlap.
     measureElement: (element, _entry, instance) => {
+      const measured = Math.round((element as HTMLElement).offsetHeight);
+      if (!Number.isFinite(measured) || measured <= 0) {
+        const index = instance.indexFromElement(element);
+        return instance.options.estimateSize(index);
+      }
+
       if (instance.isScrolling || freezeRowMeasureRef.current) {
         const index = instance.indexFromElement(element);
         const key = instance.options.getItemKey(index);
-        return instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
+        const cached = instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
+        return Math.max(cached, measured);
       }
-      return Math.round((element as HTMLElement).offsetHeight);
+
+      return measured;
     },
   });
 
