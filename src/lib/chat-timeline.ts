@@ -55,26 +55,36 @@ export function formatTimelineMonth(year: number, month: number): string {
 }
 
 export function buildChatTimeline(
-  groups: Array<{ key: string; label: string; messages: Array<{ date: Date }> }>,
+  groups: Array<{
+    key: string;
+    label: string;
+    messages: Array<{ date: Date }>;
+    /** Prefer real message counts — equal fake weights make days sub-pixel tall. */
+    messageCount?: number;
+  }>,
 ): ChatTimelineModel {
   if (groups.length === 0) {
     return { days: [], years: [], months: [] };
   }
 
-  const totalWeight = groups.reduce((sum, group) => sum + group.messages.length, 0);
+  const weights = groups.map((group) =>
+    Math.max(1, group.messageCount ?? group.messages.length),
+  );
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   let cursor = 0;
 
-  const days: TimelineDay[] = groups.map((group) => {
+  const days: TimelineDay[] = groups.map((group, index) => {
+    const weight = weights[index]!;
     const startRatio = cursor / totalWeight;
-    cursor += group.messages.length;
+    cursor += weight;
     const endRatio = cursor / totalWeight;
-    const date = new Date(group.messages[0].date);
+    const date = new Date(group.messages[0]!.date);
 
     return {
       key: group.key,
       date,
       label: group.label,
-      messageCount: group.messages.length,
+      messageCount: weight,
       startRatio,
       endRatio,
     };

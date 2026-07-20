@@ -95,6 +95,8 @@ export const ChatTimeline = memo(
     const labelWrapRef = useRef<HTMLDivElement>(null);
     const labelTextRef = useRef<HTMLParagraphElement>(null);
     const previewDayRef = useRef<TimelineDay | undefined>(undefined);
+    /** Day currently shown in the tooltip — click/select must use this, not a re-hit-test. */
+    const shownDayRef = useRef<TimelineDay | undefined>(undefined);
     const pendingJumpKeyRef = useRef<string | undefined>(undefined);
     const edgePinnedRef = useRef(false);
     const isScrubbingRef = useRef(false);
@@ -114,6 +116,7 @@ export const ChatTimeline = memo(
     const displayDay = hoverDay ?? previewDayRef.current ?? activeDay;
 
     const paintDay = useCallback((day: TimelineDay | undefined, trackRatio?: number) => {
+      if (day) shownDayRef.current = day;
       applyMarkerPosition(
         lineRef.current,
         dotRef.current,
@@ -168,18 +171,6 @@ export const ChatTimeline = memo(
       paintDay(activeDay);
     }, [activeDay, hoverDay, isScrubbing, paintDay]);
 
-    const resolveDayFromPointer = useCallback(
-      (clientY: number) => {
-        const track = trackRef.current;
-        if (!track || model.days.length === 0) return undefined;
-
-        const trackRatio = pointerTrackRatio(clientY, track);
-        lastTrackRatioRef.current = trackRatio;
-        return findTimelineDayAtTrackRatio(model.days, trackRatio);
-      },
-      [model.days],
-    );
-
     const showDayAtPointer = useCallback(
       (clientY: number, day: TimelineDay) => {
         const track = trackRef.current;
@@ -194,15 +185,37 @@ export const ChatTimeline = memo(
       [paintDay],
     );
 
+    const resolveDayForInteraction = useCallback(
+      (clientY: number) => {
+        const track = trackRef.current;
+        if (!track || model.days.length === 0) return undefined;
+
+        const trackRatio = pointerTrackRatio(clientY, track);
+        lastTrackRatioRef.current = trackRatio;
+
+        // In the padding band the marker is clamped — always use first/last day
+        // so a click on "29. Mai" cannot land on a neighboring micro-day.
+        if (trackRatio <= TIMELINE_EDGE_PADDING) {
+          return model.days[0];
+        }
+        if (trackRatio >= 1 - TIMELINE_EDGE_PADDING) {
+          return model.days.at(-1);
+        }
+
+        return findTimelineDayAtTrackRatio(model.days, trackRatio);
+      },
+      [model.days],
+    );
+
     const handlePointer = useCallback(
       (clientY: number) => {
-        const day = resolveDayFromPointer(clientY);
+        const day = resolveDayForInteraction(clientY);
         if (!day) return;
         edgePinnedRef.current = false;
         showDayAtPointer(clientY, day);
         return day;
       },
-      [resolveDayFromPointer, showDayAtPointer],
+      [resolveDayForInteraction, showDayAtPointer],
     );
 
     const pinToEdge = useCallback(
@@ -227,21 +240,22 @@ export const ChatTimeline = memo(
       if (!isScrubbing) return;
 
       function onMove(event: PointerEvent) {
-        const day = resolveDayFromPointer(event.clientY);
+        const day = resolveDayForInteraction(event.clientY);
         if (!day) return;
         showDayAtPointer(event.clientY, day);
         onPreviewDay?.(day);
       }
 
-      function onUp(event: PointerEvent) {
-        const day = resolveDayFromPointer(event.clientY) ?? previewDayRef.current;
+      function onUp() {
+        // Select the day the tooltip already shows — never re-hit-test on release
+        // (tiny pointer jitter near the top used to jump May 29 → June 2).
+        const day = shownDayRef.current ?? previewDayRef.current;
         isScrubbingRef.current = false;
         setIsScrubbing(false);
 
         if (day) {
           previewDayRef.current = day;
           pendingJumpKeyRef.current = day.key;
-          // Keep marker on the chosen day — never flash back to the old scroll day.
           hoverDayRef.current = undefined;
           setHoverDay(undefined);
           paintDay(day);
@@ -271,7 +285,7 @@ export const ChatTimeline = memo(
       onScrubEnd,
       onSelectDay,
       paintDay,
-      resolveDayFromPointer,
+      resolveDayForInteraction,
       showDayAtPointer,
     ]);
 

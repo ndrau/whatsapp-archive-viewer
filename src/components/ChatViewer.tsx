@@ -137,6 +137,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         key: day.key,
         label: day.date,
         messages: [{ date: new Date(day.date) }],
+        messageCount: day.messageCount,
       })),
     [chatIndex.days],
   );
@@ -305,12 +306,17 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       setSearchResults([]);
       setHighlightMessageId(undefined);
 
+      // Keep timeline on the clicked day immediately (scroll sync can lag a beat).
+      activeDayRef.current = dayKey;
+      setActiveDayKey(dayKey);
+      previewTimelineDay(dayKey);
+
       const startIndex = Math.max(0, dayIndex - DEFAULT_DAY_RADIUS);
       const endIndex = Math.min(chatIndex.days.length - 1, dayIndex + DEFAULT_DAY_RADIUS);
 
       void loadRangeByIndices(startIndex, endIndex, { scrollTarget: { dayKey } });
     },
-    [chatIndex.days, loadRangeByIndices],
+    [chatIndex.days, loadRangeByIndices, previewTimelineDay],
   );
 
   useEffect(() => {

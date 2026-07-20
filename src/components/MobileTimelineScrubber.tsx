@@ -14,6 +14,7 @@ import {
 import {
   type ChatTimelineModel,
   type TimelineDay,
+  TIMELINE_EDGE_PADDING,
   dataRatioToCssPercent,
   findTimelineDayAtTrackRatio,
   formatTimelineDay,
@@ -138,11 +139,17 @@ export const MobileTimelineScrubber = memo(
         }
       }, [activeDayKey, syncHandlePosition]);
 
-      const resolveDayFromPointer = useCallback(
+      const scrubDayRef = useRef<TimelineDay | undefined>(undefined);
+
+      const resolveDayForInteraction = useCallback(
         (clientY: number) => {
           const track = trackRef.current;
           if (!track || model.days.length === 0) return undefined;
-          return findTimelineDayAtTrackRatio(model.days, pointerTrackRatio(clientY, track));
+
+          const trackRatio = pointerTrackRatio(clientY, track);
+          if (trackRatio <= TIMELINE_EDGE_PADDING) return model.days[0];
+          if (trackRatio >= 1 - TIMELINE_EDGE_PADDING) return model.days.at(-1);
+          return findTimelineDayAtTrackRatio(model.days, trackRatio);
         },
         [model.days],
       );
@@ -150,16 +157,16 @@ export const MobileTimelineScrubber = memo(
       const updateScrub = useCallback(
         (clientY: number) => {
           const track = trackRef.current;
-          const day = resolveDayFromPointer(clientY);
+          const day = resolveDayForInteraction(clientY);
           if (!track || !day) return;
 
+          scrubDayRef.current = day;
           setScrubDay(day);
           setDisplayYear(day.date.getFullYear());
-          // Follow pointer, but stop at the padding edges.
           setHandleTop(`${scrubTrackRatioToCssPercent(pointerTrackRatio(clientY, track))}%`);
           onPreviewDay?.(day);
         },
-        [onPreviewDay, resolveDayFromPointer],
+        [onPreviewDay, resolveDayForInteraction],
       );
 
       const startScrub = useCallback(
@@ -174,23 +181,20 @@ export const MobileTimelineScrubber = memo(
         [onScrubbingChange, updateScrub],
       );
 
-      const endScrub = useCallback(
-        (clientY: number) => {
-          const day = resolveDayFromPointer(clientY);
-          isScrubbingRef.current = false;
-          setExpanded(false);
-          setScrubDay(undefined);
-          onScrubbingChange?.(false);
+      const endScrub = useCallback(() => {
+        const day = scrubDayRef.current;
+        isScrubbingRef.current = false;
+        setExpanded(false);
+        setScrubDay(undefined);
+        onScrubbingChange?.(false);
 
-          if (day) {
-            syncHandlePosition(day.key);
-            onSelectDay(day);
-          } else {
-            syncHandlePosition(activeDayKeyRef.current);
-          }
-        },
-        [onScrubbingChange, onSelectDay, resolveDayFromPointer, syncHandlePosition],
-      );
+        if (day) {
+          syncHandlePosition(day.key);
+          onSelectDay(day);
+        } else {
+          syncHandlePosition(activeDayKeyRef.current);
+        }
+      }, [onScrubbingChange, onSelectDay, syncHandlePosition]);
 
       useEffect(() => {
         if (!expanded) return;
@@ -200,8 +204,8 @@ export const MobileTimelineScrubber = memo(
           updateScrub(event.clientY);
         }
 
-        function onUp(event: PointerEvent) {
-          endScrub(event.clientY);
+        function onUp() {
+          endScrub();
         }
 
         window.addEventListener("pointermove", onMove, { passive: false });
