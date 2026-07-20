@@ -32,9 +32,11 @@ services:
       # Login — bitte ändern (Secret: openssl rand -base64 32)
       ARCHIVE_PASSWORD: "CHANGE_ME"
       AUTH_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARS"
+      # Max. Upload-Größe in Bytes (Default 8 GB)
+      MAX_UPLOAD_BYTES: "8589934592"
     volumes:
-      # Host-Pfad links = wo deine Chat-Dateien auf dem NAS liegen
-      - /mnt/tank/apps/whatsapp-archive/chats:/app/chats:ro
+      # Host-Pfad links = wo Chat-Dateien liegen (schreibbar für ZIP-Upload in der UI)
+      - /mnt/tank/apps/whatsapp-archive/chats:/app/chats
       - /mnt/tank/apps/whatsapp-archive/built:/app/.built
     # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
     # user: "0:0"

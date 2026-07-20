@@ -1,9 +1,8 @@
 import path from "path";
 
-/** Chat folder names are lowercase slug-safe segments only. */
-export function isValidSlug(slug: string): boolean {
-  return /^[a-z0-9-]+$/.test(slug);
-}
+import { isValidSlug } from "@/lib/slug-name";
+
+export { isValidSlug, normalizeSlugInput, titleToSlug } from "@/lib/slug-name";
 
 /**
  * Resolve `root/slug[/relative]` and reject path traversal.

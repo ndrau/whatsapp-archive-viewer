@@ -29,7 +29,7 @@ ENV HOSTNAME=0.0.0.0
 ENV BUILD_CHATS_ON_START=1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates unzip \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g tsx@4.23.1 \
   && addgroup --system --gid 1001 nodejs \

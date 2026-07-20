@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { chunkIdFromDate, dayKeyFromDate } from "@/lib/chat-day";
+import { isValidSlug } from "@/lib/slug";
 import { parseWhatsAppChat } from "@/lib/whatsapp-parser";
 import {
   BUILT_CHUNKS_DIR,
@@ -333,6 +334,62 @@ export async function readBuiltManifest(): Promise<BuiltChatManifest | null> {
   } catch {
     return null;
   }
+}
+
+/** Rebuild manifest from existing built indexes for all source chats (no re-parse). */
+export async function refreshManifest(): Promise<BuiltChatManifest> {
+  await fs.mkdir(SOURCE_CHATS_DIR, { recursive: true });
+  await fs.mkdir(BUILT_CHATS_DIR, { recursive: true });
+
+  const entries = await fs.readdir(SOURCE_CHATS_DIR, { withFileTypes: true });
+  const chats: BuiltChatManifestEntry[] = [];
+  const builtSlugs = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isSourceChatDirectory(entry.name)) continue;
+    if (!isValidSlug(entry.name)) continue;
+
+    const sourcePath = path.join(SOURCE_CHATS_DIR, entry.name, SOURCE_FILE);
+    try {
+      await fs.access(sourcePath);
+    } catch {
+      continue;
+    }
+
+    try {
+      const raw = await fs.readFile(
+        path.join(BUILT_CHATS_DIR, entry.name, BUILT_INDEX_FILE),
+        "utf-8",
+      );
+      const index = JSON.parse(raw) as BuiltChatIndex;
+      builtSlugs.add(entry.name);
+      chats.push({
+        slug: index.slug,
+        title: index.title,
+        messageCount: index.messageCount,
+        mediaCount: index.mediaFiles.length,
+        participants: index.participants,
+        builtAt: index.builtAt,
+        defaultMyName: index.defaultMyName,
+      });
+    } catch {
+      // Source exists but not built yet — skip until buildChat runs.
+    }
+  }
+
+  const manifest: BuiltChatManifest = {
+    builtAt: new Date().toISOString(),
+    chats: chats.sort((a, b) => a.title.localeCompare(b.title, "de")),
+  };
+
+  await fs.writeFile(
+    path.join(BUILT_CHATS_DIR, BUILT_MANIFEST_FILE),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf-8",
+  );
+
+  await cleanupStaleBuiltChats(builtSlugs);
+  return manifest;
 }
 
 export function getChatsDirectory(): string {
