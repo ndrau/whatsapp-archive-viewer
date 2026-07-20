@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
 
-import { parseUploadRequest, processUploadedChat } from "@/lib/chat-upload";
+import {
+  isChatUploadEnabled,
+  parseUploadRequest,
+  processUploadedChat,
+} from "@/lib/chat-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  if (!isChatUploadEnabled()) {
+    return NextResponse.json(
+      { error: "Das Hochladen neuer Chats ist derzeit deaktiviert." },
+      { status: 403 },
+    );
+  }
+
   try {
     const { job, zipPath, fields } = await parseUploadRequest(request);
 

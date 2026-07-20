@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatUploadForm } from "@/components/ChatUploadForm";
-import { fetchLocalChatList } from "@/lib/load-local-chat";
+import { fetchAppConfig, fetchLocalChatList } from "@/lib/load-local-chat";
 
 interface LocalChatListProps {
   onChatSelected: (slug: string, label: string) => void | Promise<void>;
@@ -26,14 +26,17 @@ export function LocalChatList({
   >([]);
   const [loadingList, setLoadingList] = useState(true);
   const [successMessage, setSuccessMessage] = useState("");
+  const [allowChatUpload, setAllowChatUpload] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
     try {
-      const nextChats = await fetchLocalChatList();
+      const [nextChats, config] = await Promise.all([fetchLocalChatList(), fetchAppConfig()]);
       setChats(nextChats);
+      setAllowChatUpload(config.allowChatUpload);
     } catch {
       setChats([]);
+      setAllowChatUpload(false);
     } finally {
       setLoadingList(false);
     }
@@ -45,14 +48,16 @@ export function LocalChatList({
 
   return (
     <div className="grid gap-4">
-      <ChatUploadForm
-        onError={onError}
-        onCompleted={async () => {
-          setSuccessMessage("Chat ist bereit und erscheint in der Liste.");
-          onError("");
-          await loadList();
-        }}
-      />
+      {allowChatUpload && (
+        <ChatUploadForm
+          onError={onError}
+          onCompleted={async () => {
+            setSuccessMessage("Chat ist bereit und erscheint in der Liste.");
+            onError("");
+            await loadList();
+          }}
+        />
+      )}
 
       <section className="rounded-3xl border border-black/10 bg-white/80 p-6">
         <div>

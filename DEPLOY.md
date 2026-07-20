@@ -52,8 +52,9 @@ Package auf GitHub ggf. **Public** stellen.
 1. **Stacks** → Add stack  
 2. `docker-compose.yml` einfügen  
 3. `ARCHIVE_PASSWORD` + `AUTH_SECRET` setzen  
-4. Volumes: `data` → `/app/chats`, `built` → `/app/.built`  
-5. Deploy → `http://<NAS-IP>:9180` → Login  
+4. Optional: `ALLOW_CHAT_UPLOAD=false` wenn keine neuen Uploads mehr erlaubt sein sollen  
+5. Volumes: `data` → `/app/chats`, `built` → `/app/.built`  
+6. Deploy → `http://<NAS-IP>:9180` → Login  
 
 ## Chats hinzufügen
 

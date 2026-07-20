@@ -34,6 +34,8 @@ services:
       AUTH_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARS"
       # Max. Upload-Größe in Bytes (Default 8 GB)
       MAX_UPLOAD_BYTES: "8589934592"
+      # true = ZIP-Upload in der UI erlaubt; später auf false stellen zum Abschalten
+      ALLOW_CHAT_UPLOAD: "true"
     volumes:
       # Dataset data — WhatsApp-Exporte / UI-Uploads
       - /mnt/tank/apps/whatsapp-archive/data:/app/chats

@@ -27,6 +27,13 @@ export function getMaxUploadBytes(): number {
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_UPLOAD_BYTES;
 }
 
+/** When false/0, ZIP upload UI and API are disabled (default: enabled). */
+export function isChatUploadEnabled(): boolean {
+  const raw = process.env.ALLOW_CHAT_UPLOAD?.trim().toLowerCase();
+  if (raw === undefined || raw === "") return true;
+  return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
+}
+
 async function findChatTxt(rootDir: string): Promise<string | null> {
   const stack = [rootDir];
 

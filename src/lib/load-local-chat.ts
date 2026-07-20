@@ -51,6 +51,15 @@ export async function fetchLocalChatList() {
   return data.chats;
 }
 
+export async function fetchAppConfig(): Promise<{ allowChatUpload: boolean }> {
+  const response = await fetch("/api/config");
+  if (!response.ok) {
+    return { allowChatUpload: false };
+  }
+  const data = (await response.json()) as { allowChatUpload?: boolean };
+  return { allowChatUpload: Boolean(data.allowChatUpload) };
+}
+
 export async function loadChatIndex(slug: string): Promise<ChatIndexResponse> {
   const response = await fetch(`/api/chats/${slug}`);
 
