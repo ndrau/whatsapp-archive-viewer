@@ -78,6 +78,11 @@ code {
   border-radius: 0;
 }
 
+.chat-shell--fullscreen .min-h-0.flex-1.overflow-hidden {
+  border-radius: 0;
+  box-shadow: none;
+}
+
 body[data-chat-fullscreen="true"] {
   overflow: hidden;
   overscroll-behavior: none;
