@@ -36,6 +36,13 @@ yarn-error.log*
 # vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Chat-Exporte (persönliche Quelldaten)
+/chats/*
+!/chats/.gitkeep
+
+# Gebaute Chat-Daten für die Web-App
+/.built/
+
+# WhatsApp-Exporte und Archive
+*.zip
+WhatsApp Chat*.zip
