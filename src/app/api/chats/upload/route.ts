@@ -5,11 +5,15 @@ import {
   parseUploadRequest,
   processUploadedChat,
 } from "@/lib/chat-upload";
+import { requireApiSession } from "@/lib/require-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const authError = await requireApiSession(request);
+  if (authError) return authError;
+
   if (!isChatUploadEnabled()) {
     return NextResponse.json(
       { error: "Das Hochladen neuer Chats ist derzeit deaktiviert." },

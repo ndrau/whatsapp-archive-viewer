@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 
+import { requireApiSession } from "@/lib/require-auth";
 import { readUploadJob } from "@/lib/upload-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ jobId: string }> },
 ) {
+  const authError = await requireApiSession(request);
+  if (authError) return authError;
+
   const { jobId } = await context.params;
 
   try {

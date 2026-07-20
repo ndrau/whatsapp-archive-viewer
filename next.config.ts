@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
     maxInactiveAge: 60 * 1000,
     pagesBufferLength: 5,
   },
+  experimental: {
+    // Safety net if a large body still hits middleware; uploads themselves bypass it.
+    middlewareClientMaxBodySize: "8gb",
+  },
 };
 
 export default nextConfig;
