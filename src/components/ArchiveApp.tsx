@@ -20,6 +20,7 @@ export function ArchiveApp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mobileFullscreen, setMobileFullscreen] = useState(false);
 
   const exportData = useMemo<WhatsAppExport | null>(() => {
     if (!chatIndex) return null;
@@ -51,6 +52,28 @@ export function ArchiveApp() {
       delete document.body.dataset.chatOpen;
     };
   }, [chatIndex]);
+
+  useEffect(() => {
+    if (!chatIndex) setMobileFullscreen(false);
+  }, [chatIndex]);
+
+  useEffect(() => {
+    document.body.dataset.chatFullscreen = mobileFullscreen ? "true" : "false";
+    return () => {
+      delete document.body.dataset.chatFullscreen;
+    };
+  }, [mobileFullscreen]);
+
+  // Fullscreen is mobile-only — leave it when rotating/resizing to desktop.
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const onChange = () => {
+      if (media.matches) setMobileFullscreen(false);
+    };
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
 
   async function handleChatSelected(slug: string, label: string) {
     setLoading(true);
@@ -100,74 +123,121 @@ export function ArchiveApp() {
   }
 
   return (
-    <div className="chat-shell flex flex-col bg-[var(--wa-page-bg)]">
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden px-3 py-3 sm:px-4">
-        <header className="mb-3 shrink-0 rounded-2xl bg-[var(--wa-accent)] px-4 py-3 text-white shadow-lg">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+    <div
+      className={`chat-shell flex flex-col bg-[var(--wa-page-bg)] ${
+        mobileFullscreen ? "chat-shell--fullscreen" : ""
+      }`}
+    >
+      <div
+        className={`mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden ${
+          mobileFullscreen ? "px-0 py-0" : "px-3 py-3 sm:px-4"
+        }`}
+      >
+        <header
+          className={`shrink-0 bg-[var(--wa-accent)] text-white ${
+            mobileFullscreen
+              ? "rounded-none px-3 py-2 shadow-none"
+              : "mb-3 rounded-2xl px-4 py-3 shadow-lg"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate text-xs uppercase tracking-[0.2em] text-white/70">{sourceLabel}</p>
-              <h1 className="truncate text-xl font-semibold">{chatIndex.chatTitle}</h1>
-              <p className="text-xs text-white/80">
-                {chatIndex.messageCount.toLocaleString("de-DE")} Nachrichten
-              </p>
+              {!mobileFullscreen && (
+                <p className="truncate text-xs uppercase tracking-[0.2em] text-white/70">
+                  {sourceLabel}
+                </p>
+              )}
+              <h1
+                className={`truncate font-semibold ${
+                  mobileFullscreen ? "text-base" : "text-xl"
+                }`}
+              >
+                {chatIndex.chatTitle}
+              </h1>
+              {!mobileFullscreen && (
+                <p className="text-xs text-white/80">
+                  {chatIndex.messageCount.toLocaleString("de-DE")} Nachrichten
+                </p>
+              )}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-full border border-white/25 px-3 py-1.5 text-sm font-medium"
-                onClick={() => {
-                  setChatIndex(null);
-                  setSourceLabel("");
-                  setError("");
-                }}
-              >
-                Zurück
-              </button>
-              <LogoutButton variant="light" />
+            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              {mobileFullscreen ? (
+                <button
+                  type="button"
+                  className="rounded-full border border-white/25 px-3 py-1.5 text-sm font-medium md:hidden"
+                  onClick={() => setMobileFullscreen(false)}
+                >
+                  Beenden
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="rounded-full border border-white/25 px-3 py-1.5 text-sm font-medium"
+                    onClick={() => {
+                      setChatIndex(null);
+                      setSourceLabel("");
+                      setError("");
+                    }}
+                  >
+                    Zurück
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--wa-accent)] md:hidden"
+                    onClick={() => setMobileFullscreen(true)}
+                  >
+                    Vollbild
+                  </button>
+                  <LogoutButton variant="light" />
+                </>
+              )}
             </div>
           </div>
         </header>
 
-        <section className="mb-3 shrink-0 rounded-2xl bg-white/90 p-3 shadow-sm sm:p-4">
-          <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">
-                Wer bist du in diesem Chat?
-              </span>
-              <select
-                value={myName}
-                onChange={(event) => setMyName(event.target.value)}
-                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-              >
-                {chatIndex.participants.map((participant) => (
-                  <option key={participant} value={participant}>
-                    {participant}
-                  </option>
-                ))}
-              </select>
-            </label>
+        {!mobileFullscreen && (
+          <section className="mb-3 shrink-0 rounded-2xl bg-white/90 p-3 shadow-sm sm:p-4">
+            <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">
+                  Wer bist du in diesem Chat?
+                </span>
+                <select
+                  value={myName}
+                  onChange={(event) => setMyName(event.target.value)}
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                >
+                  {chatIndex.participants.map((participant) => (
+                    <option key={participant} value={participant}>
+                      {participant}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">Suche</span>
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Nachricht oder Name suchen…"
-                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-              />
-            </label>
-          </div>
-
-          {stats && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <StatBadge label="Bilder" value={stats.images} />
-              <StatBadge label="Videos" value={stats.videos} />
-              <StatBadge label="Audio" value={stats.audio} />
-              <StatBadge label="Sprachnachrichten" value={stats.voice} />
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-[var(--wa-text)]">Suche</span>
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Nachricht oder Name suchen…"
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                />
+              </label>
             </div>
-          )}
-        </section>
+
+            {stats && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <StatBadge label="Bilder" value={stats.images} />
+                <StatBadge label="Videos" value={stats.videos} />
+                <StatBadge label="Audio" value={stats.audio} />
+                <StatBadge label="Sprachnachrichten" value={stats.voice} />
+              </div>
+            )}
+          </section>
+        )}
 
         <ChatViewer
           chatIndex={chatIndex}
