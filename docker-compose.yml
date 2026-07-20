@@ -1,15 +1,15 @@
-# TrueNAS / Portainer — Image von GitHub Container Registry, Daten per Volume
+# TrueNAS / Portainer — App-Image + zwei getrennte Datasets
 #
-# 1) Datasets anlegen und Pfade unten anpassen:
-#      /mnt/tank/apps/whatsapp-archive/chats   ← Roh-Exporte (andy/_chat.txt + Medien)
-#      /mnt/tank/apps/whatsapp-archive/built  ← generiert (leer lassen, App füllt)
-# 2) ARCHIVE_PASSWORD + AUTH_SECRET setzen
-# 3) Portainer → Stacks → diese Datei einfügen → Deploy
-# 4) http://<truenas-ip>:3080
+# Trennung:
+#   1) DATA   — dauerhafte Chat-Rohdaten (Uploads). Überlebt App-Updates immer.
+#   2) BUILT  — generierte Index/JSON-Artefakte. Löschbar, App baut neu.
+#   3) IMAGE  — nur Programmcode (ghcr.io/…). Enthält keine persönlichen Daten.
 #
-# Image enthält KEINE Chat-Daten — nur die App.
-# Erstes Image-Push: GitHub Actions auf main → ghcr.io/ndrau/whatsapp-archive-viewer:latest
-# Package ggf. unter github.com → Packages auf "Public" stellen (sonst Registry-Login in Portainer).
+# TrueNAS-Datasets anlegen (Pfade unten anpassen):
+#   /mnt/tank/apps/whatsapp-archive/data
+#   /mnt/tank/apps/whatsapp-archive/built
+#
+# Deploy: Portainer Stack → Passwort setzen → Deploy → http://<nas-ip>:3080
 
 services:
   whatsapp-archive:
@@ -26,8 +26,8 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       TZ: Europe/Berlin
-      # 1 = beim Start chats/ neu parsen (nach Export-Update)
-      # 0 = vorhandenes .built Volume nutzen (schnellerer Start)
+      # 1 = beim Start aus DATA neu bauen (empfohlen nach App-Update / neuem Upload)
+      # 0 = vorhandene BUILT-Artefakte nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"
       # Login — bitte ändern (Secret: openssl rand -base64 32)
       ARCHIVE_PASSWORD: "CHANGE_ME"
@@ -35,8 +35,9 @@ services:
       # Max. Upload-Größe in Bytes (Default 8 GB)
       MAX_UPLOAD_BYTES: "8589934592"
     volumes:
-      # Host-Pfad links = wo Chat-Dateien liegen (schreibbar für ZIP-Upload in der UI)
-      - /mnt/tank/apps/whatsapp-archive/chats:/app/chats
+      # Dataset DATA — WhatsApp-Exporte / UI-Uploads (schreibbar, persistent)
+      - /mnt/tank/apps/whatsapp-archive/data:/app/chats
+      # Dataset BUILT — Index, Suche, Upload-Jobs (neu generierbar)
       - /mnt/tank/apps/whatsapp-archive/built:/app/.built
     # TrueNAS: Dataset-Rechte für UID 1001 (nextjs) oder vorübergehend:
     # user: "0:0"

@@ -1,8 +1,8 @@
 # WhatsApp Archive Viewer — TrueNAS / Portainer
 #
-# App-Image = nur Code. Persönliche Daten kommen als Volumes:
-#   /app/chats   → Roh-Exporte (_chat.txt + Medien)
-#   /app/.built  → generierte JSON (neu baubar)
+# App-Image = nur Code. Persistente Datasets als Volumes:
+#   /app/chats   ← DATA  (Uploads / WhatsApp-Exporte, überlebt Image-Updates)
+#   /app/.built  ← BUILT (Index/JSON, jederzeit neu baubar)
 
 FROM node:22-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
