@@ -69,6 +69,28 @@ async function listSourceMediaFiles(sourceDir: string): Promise<string[]> {
   return files.filter((file) => !SOURCE_IGNORED_FILES.has(file) && !file.startsWith("."));
 }
 
+async function buildMediaBytesLookup(
+  sourceDir: string,
+  mediaFiles: string[],
+): Promise<(filename: string) => number | undefined> {
+  const byName = new Map<string, number>();
+  const byLower = new Map<string, number>();
+
+  await Promise.all(
+    mediaFiles.map(async (file) => {
+      try {
+        const stat = await fs.stat(path.join(sourceDir, file));
+        byName.set(file, stat.size);
+        byLower.set(file.toLowerCase(), stat.size);
+      } catch {
+        // Missing media files are fine — parser falls back to structural dedupe.
+      }
+    }),
+  );
+
+  return (filename: string) => byName.get(filename) ?? byLower.get(filename.toLowerCase());
+}
+
 function serializeMessage(message: {
   id: string;
   date: Date;
@@ -129,7 +151,8 @@ export async function buildChat(slug: string): Promise<BuiltChatIndex> {
     readChatMeta(sourceDir),
   ]);
 
-  const parsed = parseWhatsAppChat(text, SOURCE_FILE);
+  const getMediaBytes = await buildMediaBytesLookup(sourceDir, mediaFiles);
+  const parsed = parseWhatsAppChat(text, SOURCE_FILE, { getMediaBytes });
   const builtAt = new Date().toISOString();
   const title = meta.title ?? parsed.chatTitle ?? titleFromSlug(slug);
   const messages = parsed.messages.map(serializeMessage);
