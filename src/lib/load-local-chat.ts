@@ -60,6 +60,17 @@ export async function fetchAppConfig(): Promise<{ allowChatUpload: boolean }> {
   return { allowChatUpload: Boolean(data.allowChatUpload) };
 }
 
+export async function deleteLocalChat(slug: string): Promise<void> {
+  const response = await fetch(`/api/chats/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Chat konnte nicht gelöscht werden.");
+  }
+}
+
 export async function loadChatIndex(slug: string): Promise<ChatIndexResponse> {
   const response = await fetch(`/api/chats/${slug}`);
 

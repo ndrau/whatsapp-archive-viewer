@@ -7,6 +7,7 @@ import { LocalChatList } from "@/components/LocalChatList";
 import { LogoutButton } from "@/components/LogoutButton";
 import { getMediaKind, isVoiceMessage } from "@/lib/media-types";
 import {
+  deleteLocalChat,
   loadChatIndex,
   toWhatsAppExport,
   type ChatIndexResponse,
@@ -20,6 +21,7 @@ export function ArchiveApp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [mobileFullscreen, setMobileFullscreen] = useState(false);
 
   const exportData = useMemo<WhatsAppExport | null>(() => {
@@ -89,6 +91,33 @@ export function ArchiveApp() {
       setError(loadError instanceof Error ? loadError.message : "Chat konnte nicht geladen werden.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDeleteOpenChat() {
+    if (!chatIndex) return;
+
+    const title = chatIndex.chatTitle || sourceLabel || chatIndex.slug;
+    const confirmed = window.confirm(
+      `„${title}“ wirklich unwiderruflich löschen?\n\n` +
+        "Es werden der Export (Quelle) und die vorbereiteten Dateien gelöscht. Das lässt sich nicht rückgängig machen.",
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError("");
+    try {
+      await deleteLocalChat(chatIndex.slug);
+      setChatIndex(null);
+      setSourceLabel("");
+      setSearchQuery("");
+      setMobileFullscreen(false);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : "Chat konnte nicht gelöscht werden.",
+      );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -175,6 +204,7 @@ export function ArchiveApp() {
                   <button
                     type="button"
                     className="rounded-full border border-white/25 px-3 py-1.5 text-sm font-medium"
+                    disabled={deleting}
                     onClick={() => {
                       setChatIndex(null);
                       setSourceLabel("");
@@ -185,7 +215,16 @@ export function ArchiveApp() {
                   </button>
                   <button
                     type="button"
+                    className="rounded-full border border-red-200/80 bg-red-500/20 px-3 py-1.5 text-sm font-medium text-white"
+                    disabled={deleting}
+                    onClick={() => void handleDeleteOpenChat()}
+                  >
+                    {deleting ? "Lösche…" : "Löschen"}
+                  </button>
+                  <button
+                    type="button"
                     className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--wa-accent)] md:hidden"
+                    disabled={deleting}
                     onClick={() => setMobileFullscreen(true)}
                   >
                     Vollbild
@@ -246,17 +285,27 @@ export function ArchiveApp() {
           searchQuery={searchQuery}
         />
 
-        {(loading || error) && <StatusToast loading={loading} error={error} />}
+        {(loading || deleting || error) && (
+          <StatusToast loading={loading || deleting} error={error} deleting={deleting} />
+        )}
       </div>
     </div>
   );
 }
 
-function StatusToast({ loading, error }: { loading: boolean; error: string }) {
+function StatusToast({
+  loading,
+  error,
+  deleting = false,
+}: {
+  loading: boolean;
+  error: string;
+  deleting?: boolean;
+}) {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
       <div className="rounded-full bg-[#111b21] px-5 py-3 text-sm text-white shadow-lg">
-        {loading ? "Chat wird geladen…" : error}
+        {deleting ? "Chat wird gelöscht…" : loading ? "Chat wird geladen…" : error}
       </div>
     </div>
   );

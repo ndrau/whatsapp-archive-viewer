@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatUploadForm } from "@/components/ChatUploadForm";
-import { fetchAppConfig, fetchLocalChatList } from "@/lib/load-local-chat";
+import {
+  deleteLocalChat,
+  fetchAppConfig,
+  fetchLocalChatList,
+} from "@/lib/load-local-chat";
 
 interface LocalChatListProps {
   onChatSelected: (slug: string, label: string) => void | Promise<void>;
@@ -28,6 +32,7 @@ export function LocalChatList({
   const [successMessage, setSuccessMessage] = useState("");
   const [allowChatUpload, setAllowChatUpload] = useState(false);
   const [listError, setListError] = useState("");
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -51,6 +56,29 @@ export function LocalChatList({
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  async function handleDeleteChat(chat: { slug: string; title: string }) {
+    const confirmed = window.confirm(
+      `„${chat.title}“ wirklich unwiderruflich löschen?\n\n` +
+        "Es werden der Export (Quelle) und die vorbereiteten Dateien gelöscht. Das lässt sich nicht rückgängig machen.",
+    );
+    if (!confirmed) return;
+
+    setDeletingSlug(chat.slug);
+    onError("");
+    setSuccessMessage("");
+    try {
+      await deleteLocalChat(chat.slug);
+      setSuccessMessage(`„${chat.title}“ wurde gelöscht.`);
+      await loadList();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Chat konnte nicht gelöscht werden.";
+      onError(message);
+    } finally {
+      setDeletingSlug(null);
+    }
+  }
 
   return (
     <div className="grid gap-4">
@@ -102,32 +130,46 @@ export function LocalChatList({
         ) : (
           <div className="mt-5 grid gap-3">
             {chats.map((chat) => (
-              <button
+              <div
                 key={chat.slug}
-                type="button"
-                className="flex w-full items-center justify-between rounded-2xl border border-black/10 bg-white px-4 py-4 text-left transition hover:border-[var(--wa-accent)] hover:bg-[var(--wa-accent-soft)]/40"
-                onClick={() => {
-                  onLoadingChange(true);
-                  onError("");
-                  setSuccessMessage("");
-                  void Promise.resolve(onChatSelected(chat.slug, chat.title)).finally(() =>
-                    onLoadingChange(false),
-                  );
-                }}
+                className="flex w-full items-stretch gap-2 rounded-2xl border border-black/10 bg-white p-2 transition hover:border-[var(--wa-accent)] hover:bg-[var(--wa-accent-soft)]/40"
               >
-                <div>
-                  <p className="font-semibold text-[var(--wa-text)]">{chat.title}</p>
-                  <p className="mt-1 text-sm text-[var(--wa-muted)]">
-                    {chat.messageCount.toLocaleString("de-DE")} Nachrichten
-                    {chat.mediaCount > 0
-                      ? ` · ${chat.mediaCount.toLocaleString("de-DE")} Fotos & Videos`
-                      : ""}
-                  </p>
-                </div>
-                <span className="rounded-full bg-[var(--wa-accent-soft)] px-3 py-1 text-xs font-medium text-[var(--wa-accent-dark)]">
-                  Öffnen
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center justify-between rounded-xl px-3 py-3 text-left"
+                  disabled={deletingSlug === chat.slug}
+                  onClick={() => {
+                    onLoadingChange(true);
+                    onError("");
+                    setSuccessMessage("");
+                    void Promise.resolve(onChatSelected(chat.slug, chat.title)).finally(() =>
+                      onLoadingChange(false),
+                    );
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-[var(--wa-text)]">{chat.title}</p>
+                    <p className="mt-1 text-sm text-[var(--wa-muted)]">
+                      {chat.messageCount.toLocaleString("de-DE")} Nachrichten
+                      {chat.mediaCount > 0
+                        ? ` · ${chat.mediaCount.toLocaleString("de-DE")} Fotos & Videos`
+                        : ""}
+                    </p>
+                  </div>
+                  <span className="ml-3 shrink-0 rounded-full bg-[var(--wa-accent-soft)] px-3 py-1 text-xs font-medium text-[var(--wa-accent-dark)]">
+                    Öffnen
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 self-center rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+                  disabled={deletingSlug !== null}
+                  aria-label={`„${chat.title}“ löschen`}
+                  onClick={() => void handleDeleteChat(chat)}
+                >
+                  {deletingSlug === chat.slug ? "Lösche…" : "Löschen"}
+                </button>
+              </div>
             ))}
           </div>
         )}
