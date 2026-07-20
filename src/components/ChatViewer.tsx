@@ -204,16 +204,23 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     getScrollElement: () => scrollRef.current,
     // Gap is padding inside each row — include it in the estimate too.
     estimateSize: (index) => estimateRowSize(rows[index]) + ROW_GAP_PX,
-    overscan: 10,
+    overscan: 8,
     gap: 0,
     getItemKey: (index) => rows[index]?.id ?? index,
+    // Critical for smooth wheel scrolling: while the user is scrolling, never
+    // let ResizeObserver resize rows (that nudges scrollTop → jitter).
     useScrollendEvent: true,
-    isScrollingResetDelay: 200,
-    useAnimationFrameWithResizeObserver: true,
+    isScrollingResetDelay: 150,
+    useAnimationFrameWithResizeObserver: false,
     measureElement: (element, _entry, instance) => {
+      const index = instance.indexFromElement(element);
+      if (instance.isScrolling) {
+        const key = instance.options.getItemKey(index);
+        return instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
+      }
+
       const measured = Math.round((element as HTMLElement).offsetHeight);
       if (!Number.isFinite(measured) || measured <= 0) {
-        const index = instance.indexFromElement(element);
         return instance.options.estimateSize(index);
       }
       return measured;
@@ -623,7 +630,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     const container = scrollRef.current;
     if (!container || searchActive) return;
 
-    const onScroll = () => {
+    let timelineRaf = 0;
+
+    const syncTimelineFromScroll = () => {
+      timelineRaf = 0;
       const jumpLocked = performance.now() < jumpLockUntilRef.current;
 
       if (!jumpLocked) {
@@ -633,32 +643,65 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
           previewTimelineDay(nextDayKey);
         }
       } else if (activeDayRef.current) {
-        // Keep the clicked day visible on the timeline while the jump settles.
         previewTimelineDay(activeDayRef.current);
+      }
+    };
+
+    const onScroll = () => {
+      // Keep scroll handler tiny — no React setState, no measure, no extend.
+      if (!timelineRaf) {
+        timelineRaf = requestAnimationFrame(syncTimelineFromScroll);
       }
 
       if (isMobileRef.current && !scrubbingRef.current) {
         mobileScrubberRef.current?.showHandle();
         scheduleHandleHide();
       }
+    };
+
+    const onScrollEnd = () => {
+      if (timelineRaf) {
+        cancelAnimationFrame(timelineRaf);
+        timelineRaf = 0;
+      }
+      syncTimelineFromScroll();
+
+      // Safe to reconcile real row heights once momentum has stopped.
+      rowVirtualizer.measure();
+
+      if (activeDayRef.current) {
+        setActiveDayKey(activeDayRef.current);
+      }
 
       clearTimeout(extendTimerRef.current);
       extendTimerRef.current = setTimeout(() => {
-        if (activeDayRef.current) {
-          setActiveDayKey(activeDayRef.current);
-        }
-
         if (performance.now() >= jumpLockUntilRef.current) {
           void maybeExtendWindow();
         }
-      }, SCROLL_IDLE_MS);
+      }, 80);
     };
 
-    container.addEventListener("scroll", onScroll, { passive: true });
+    // Fallback for browsers without scrollend (debounce).
+    const onScrollFallback = () => {
+      onScroll();
+      clearTimeout(extendTimerRef.current);
+      extendTimerRef.current = setTimeout(onScrollEnd, SCROLL_IDLE_MS);
+    };
+
+    const supportsScrollEnd = "onscrollend" in container;
+    container.addEventListener("scroll", supportsScrollEnd ? onScroll : onScrollFallback, {
+      passive: true,
+    });
+    if (supportsScrollEnd) {
+      container.addEventListener("scrollend", onScrollEnd, { passive: true });
+    }
+
     return () => {
-      container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("scroll", supportsScrollEnd ? onScroll : onScrollFallback);
+      container.removeEventListener("scrollend", onScrollEnd);
       clearTimeout(extendTimerRef.current);
       clearTimeout(overlayHideTimerRef.current);
+      if (timelineRaf) cancelAnimationFrame(timelineRaf);
     };
   }, [
     maybeExtendWindow,
@@ -809,16 +852,12 @@ const VirtualChatRows = function VirtualChatRows({
   onOpenSearchResult,
 }: VirtualChatRowsProps) {
   const virtualItems = rowVirtualizer.getVirtualItems();
-  // Flow layout (not absolute translate): visible bubbles always stack with the
-  // same padding-bottom gap, so estimate drift cannot create overlaps/holes.
-  const paddingTop = virtualItems[0]?.start ?? 0;
-  const lastItem = virtualItems.at(-1);
-  const paddingBottom = lastItem
-    ? Math.max(0, rowVirtualizer.getTotalSize() - lastItem.end)
-    : 0;
 
   return (
-    <div className="w-full" style={{ paddingTop, paddingBottom }}>
+    <div
+      className="relative w-full"
+      style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+    >
       {virtualItems.map((virtualRow) => {
         const row = rows[virtualRow.index];
         if (!row) return null;
@@ -828,8 +867,12 @@ const VirtualChatRows = function VirtualChatRows({
             key={row.id}
             ref={rowVirtualizer.measureElement}
             data-index={virtualRow.index}
-            className="virtual-chat-row w-full"
-            style={{ paddingBottom: ROW_GAP_PX }}
+            className="virtual-chat-row absolute left-0 top-0 w-full"
+            style={{
+              // Transform keeps scrolling on the compositor; avoid layout during wheel.
+              transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+              paddingBottom: ROW_GAP_PX,
+            }}
           >
             {row.kind === "day-header" && (
               <div className="flex justify-center pb-1">
