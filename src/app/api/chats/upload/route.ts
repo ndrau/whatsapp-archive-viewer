@@ -4,6 +4,8 @@ import {
   isChatUploadEnabled,
   parseUploadRequest,
   processUploadedChat,
+  releaseUploadSlot,
+  tryAcquireUploadSlot,
 } from "@/lib/chat-upload";
 import { requireApiSession } from "@/lib/require-auth";
 
@@ -21,10 +23,18 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!tryAcquireUploadSlot()) {
+    return NextResponse.json(
+      { error: "Es läuft bereits ein Upload. Bitte warten, bis er fertig ist." },
+      { status: 429 },
+    );
+  }
+
   try {
     const { job, zipPath, fields } = await parseUploadRequest(request);
 
     // Long-running Next server (Docker): continue after response.
+    // Slot is released in processUploadedChat's finally.
     void processUploadedChat({
       jobId: job.id,
       zipPath,
@@ -40,6 +50,7 @@ export async function POST(request: Request) {
       message: job.message,
     });
   } catch (error) {
+    releaseUploadSlot();
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Upload fehlgeschlagen." },
       { status: 400 },

@@ -76,11 +76,14 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all paths except Next internals, static assets, and chat ZIP upload.
+     * Match all paths except Next internals, favicon, and chat ZIP upload.
      * Upload is excluded so Next does not buffer multi‑GB bodies in middleware
      * (default 10MB truncates the form → "Unexpected end of form").
      * Auth for /api/chats/upload* is enforced in the route handlers.
+     *
+     * Do NOT exclude paths by file extension (e.g. *.jpg): that would skip auth
+     * for /api/chats/.../media/*.jpg and expose private WhatsApp photos.
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/chats/upload(?:/.*)?$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/chats/upload(?:/.*)?$).*)",
   ],
 };

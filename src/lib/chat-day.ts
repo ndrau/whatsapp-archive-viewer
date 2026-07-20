@@ -58,3 +58,6 @@ export function selectDayRange<T extends { key: string }>(
 }
 
 export const DEFAULT_DAY_RADIUS = 7;
+
+/** Max days kept in the chat viewer DOM to avoid unbounded memory growth. */
+export const MAX_LOADED_DAYS = 45;

@@ -9,8 +9,12 @@ import {
   isAuthDisabled,
   passwordsMatch,
 } from "@/lib/auth";
+import { clientKeyFromRequest, takeRateLimitSlot } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 export async function POST(request: Request) {
   if (isAuthDisabled()) {
@@ -24,6 +28,20 @@ export async function POST(request: Request) {
           "Login ist nicht konfiguriert. Bitte ARCHIVE_PASSWORD und AUTH_SECRET (mind. 32 Zeichen) setzen.",
       },
       { status: 503 },
+    );
+  }
+
+  const rate = takeRateLimitSlot(`login:${clientKeyFromRequest(request)}`, {
+    limit: LOGIN_LIMIT,
+    windowMs: LOGIN_WINDOW_MS,
+  });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: "Zu viele Login-Versuche. Bitte später erneut versuchen." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSec) },
+      },
     );
   }
 
@@ -47,6 +65,9 @@ export async function POST(request: Request) {
 
   const { token, expiresAt } = await createSessionToken(secret);
   const response = NextResponse.json({ ok: true, expiresAt });
-  response.headers.append("Set-Cookie", buildSessionCookieHeader(token, expiresAt, request.url));
+  response.headers.append(
+    "Set-Cookie",
+    buildSessionCookieHeader(token, expiresAt, request.url, request),
+  );
   return response;
 }

@@ -19,6 +19,20 @@ import {
 
 const SOURCE_FILE = "_chat.txt";
 const DEFAULT_MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 200_000;
+const MAX_CONCURRENT_UPLOADS = 1;
+
+let activeUploads = 0;
+
+export function tryAcquireUploadSlot(): boolean {
+  if (activeUploads >= MAX_CONCURRENT_UPLOADS) return false;
+  activeUploads += 1;
+  return true;
+}
+
+export function releaseUploadSlot(): void {
+  activeUploads = Math.max(0, activeUploads - 1);
+}
 
 export function getMaxUploadBytes(): number {
   const raw = process.env.MAX_UPLOAD_BYTES?.trim();
@@ -27,11 +41,39 @@ export function getMaxUploadBytes(): number {
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_UPLOAD_BYTES;
 }
 
+function getMaxUncompressedBytes(): number {
+  // Soft zip-bomb guard: uncompressed payload may exceed the ZIP size, but not unboundedly.
+  return Math.max(getMaxUploadBytes() * 3, 24 * 1024 * 1024 * 1024);
+}
+
 /** When false/0, ZIP upload UI and API are disabled (default: enabled). */
 export function isChatUploadEnabled(): boolean {
   const raw = process.env.ALLOW_CHAT_UPLOAD?.trim().toLowerCase();
   if (raw === undefined || raw === "") return true;
   return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
+}
+
+function publicUploadError(error: unknown): string {
+  if (!(error instanceof Error)) return "Unbekannter Fehler.";
+  const message = error.message;
+
+  // Known, safe user-facing messages from this module.
+  if (
+    message.startsWith("Im ZIP") ||
+    message.startsWith("ZIP ") ||
+    message.startsWith("Entpacken") ||
+    message.startsWith("Ungültiger") ||
+    message.includes("WhatsApp") ||
+    message.includes("_chat.txt") ||
+    message.includes("zu viele Dateien") ||
+    message.includes("zu groß") ||
+    message.includes("ungültige Pfade")
+  ) {
+    return message;
+  }
+
+  console.error("Chat-Upload fehlgeschlagen:", error);
+  return "Verarbeitung fehlgeschlagen. Bitte ZIP prüfen und erneut versuchen.";
 }
 
 async function findChatTxt(rootDir: string): Promise<string | null> {
@@ -73,6 +115,10 @@ async function copyDirContents(fromDir: string, toDir: string): Promise<void> {
       throw new Error("Ungültiger Dateipfad im Export.");
     }
 
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
     if (entry.isDirectory()) {
       await copyDirContents(source, target);
     } else if (entry.isFile()) {
@@ -81,9 +127,73 @@ async function copyDirContents(fromDir: string, toDir: string): Promise<void> {
   }
 }
 
+function isUnsafeZipEntryName(name: string): boolean {
+  const normalized = name.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized || normalized.includes("\0")) return true;
+  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return true;
+  const parts = normalized.split("/");
+  if (parts.some((part) => part === ".." || part === "")) return true;
+  return false;
+}
+
+function assertZipArchiveSafe(zipPath: string): void {
+  const namesResult = spawnSync("unzip", ["-Z1", zipPath], {
+    encoding: "utf-8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+
+  if (namesResult.error) {
+    throw new Error(
+      `Entpacken nicht möglich (${namesResult.error.message}). Im Docker-Image muss „unzip“ installiert sein.`,
+    );
+  }
+
+  if ((namesResult.status ?? 1) !== 0) {
+    throw new Error("ZIP konnte nicht gelesen werden.");
+  }
+
+  const names = namesResult.stdout.split(/\r?\n/).filter(Boolean);
+  if (names.length === 0) {
+    throw new Error("ZIP ist leer.");
+  }
+  if (names.length > MAX_ZIP_ENTRIES) {
+    throw new Error("ZIP enthält zu viele Dateien.");
+  }
+
+  for (const name of names) {
+    if (isUnsafeZipEntryName(name)) {
+      throw new Error("ZIP enthält ungültige Pfade.");
+    }
+  }
+
+  const listResult = spawnSync("unzip", ["-l", zipPath], {
+    encoding: "utf-8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+
+  if ((listResult.status ?? 1) !== 0) {
+    throw new Error("ZIP konnte nicht gelesen werden.");
+  }
+
+  const totalLine = listResult.stdout
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .at(-1);
+  const totalMatch = totalLine?.match(/^\s*(\d+)\s+/);
+  if (totalMatch) {
+    const uncompressed = Number(totalMatch[1]);
+    if (Number.isFinite(uncompressed) && uncompressed > getMaxUncompressedBytes()) {
+      throw new Error("ZIP ist nach dem Entpacken zu groß.");
+    }
+  }
+}
+
 async function extractZip(zipPath: string, extractDir: string): Promise<void> {
   await fs.rm(extractDir, { recursive: true, force: true });
   await fs.mkdir(extractDir, { recursive: true });
+
+  assertZipArchiveSafe(zipPath);
 
   const result = spawnSync("unzip", ["-q", "-o", zipPath, "-d", extractDir], {
     encoding: "utf-8",
@@ -96,8 +206,7 @@ async function extractZip(zipPath: string, extractDir: string): Promise<void> {
   }
 
   if ((result.status ?? 1) !== 0) {
-    const detail = (result.stderr || result.stdout || "").trim();
-    throw new Error(detail || "ZIP konnte nicht entpackt werden.");
+    throw new Error("ZIP konnte nicht entpackt werden.");
   }
 }
 
@@ -166,9 +275,10 @@ export async function processUploadedChat(options: {
     await updateUploadJob(jobId, {
       status: "error",
       message: "Upload fehlgeschlagen.",
-      error: error instanceof Error ? error.message : "Unbekannter Fehler.",
+      error: publicUploadError(error),
     });
   } finally {
+    releaseUploadSlot();
     await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => undefined);
     await fs.rm(zipPath, { force: true }).catch(() => undefined);
   }

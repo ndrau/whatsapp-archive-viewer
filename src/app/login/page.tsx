@@ -3,6 +3,8 @@
 import { Suspense, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { safeInternalPath } from "@/lib/safe-next";
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -29,9 +31,7 @@ function LoginForm() {
         return;
       }
 
-      const next = searchParams.get("next");
-      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
-      router.replace(target);
+      router.replace(safeInternalPath(searchParams.get("next")));
       router.refresh();
     } catch {
       setError("Login fehlgeschlagen. Bitte später erneut versuchen.");

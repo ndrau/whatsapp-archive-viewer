@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { readBuiltManifest } from "@/lib/build-chats";
+import { requireApiSession } from "@/lib/require-auth";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await requireApiSession(request);
+  if (authError) return authError;
+
   try {
     const manifest = await readBuiltManifest();
 

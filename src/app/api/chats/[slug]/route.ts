@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { readBuiltChatIndex } from "@/lib/chat-store";
+import { requireApiSession } from "@/lib/require-auth";
 
 interface RouteParams {
   params: Promise<{ slug: string }>;
 }
 
-export async function GET(_request: Request, { params }: RouteParams) {
+export async function GET(request: Request, { params }: RouteParams) {
+  const authError = await requireApiSession(request);
+  if (authError) return authError;
+
   try {
     const { slug } = await params;
     const index = await readBuiltChatIndex(slug);

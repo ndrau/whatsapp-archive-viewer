@@ -150,8 +150,19 @@ export function passwordsMatch(provided: string, expected: string): boolean {
   return diff === 0;
 }
 
-export function buildSessionCookieHeader(token: string, expiresAt: number, requestUrl: string): string {
-  const secure = new URL(requestUrl).protocol === "https:";
+function requestLooksHttps(requestUrl: string, request?: Request): boolean {
+  if (new URL(requestUrl).protocol === "https:") return true;
+  const proto = request?.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  return proto === "https";
+}
+
+export function buildSessionCookieHeader(
+  token: string,
+  expiresAt: number,
+  requestUrl: string,
+  request?: Request,
+): string {
+  const secure = requestLooksHttps(requestUrl, request);
   const maxAge = Math.max(1, Math.floor((expiresAt - Date.now()) / 1000));
   const parts = [
     `${SESSION_COOKIE}=${token}`,
@@ -164,8 +175,8 @@ export function buildSessionCookieHeader(token: string, expiresAt: number, reque
   return parts.join("; ");
 }
 
-export function buildClearSessionCookieHeader(requestUrl: string): string {
-  const secure = new URL(requestUrl).protocol === "https:";
+export function buildClearSessionCookieHeader(requestUrl: string, request?: Request): string {
+  const secure = requestLooksHttps(requestUrl, request);
   const parts = [
     `${SESSION_COOKIE}=`,
     "Path=/",

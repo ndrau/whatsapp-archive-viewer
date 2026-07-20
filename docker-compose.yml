@@ -29,9 +29,10 @@ services:
       # 1 = beim Start aus data neu bauen (empfohlen nach App-Update / neuem Upload)
       # 0 = vorhandene Artefakte in built nutzen (schnellerer Start)
       BUILD_CHATS_ON_START: "1"
-      # Login — bitte ändern (Secret: openssl rand -base64 32)
-      ARCHIVE_PASSWORD: "CHANGE_ME"
-      AUTH_SECRET: "CHANGE_ME_TO_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARS"
+      # Login — in Portainer als Stack-Env setzen (nicht die Defaults deployen!)
+      # openssl rand -base64 32
+      ARCHIVE_PASSWORD: ${ARCHIVE_PASSWORD:?Set ARCHIVE_PASSWORD in stack env}
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (min 32 chars) in stack env}
       # Max. Upload-Größe in Bytes (Default 8 GB)
       MAX_UPLOAD_BYTES: "8589934592"
       # true = ZIP-Upload in der UI erlaubt; später auf false stellen zum Abschalten

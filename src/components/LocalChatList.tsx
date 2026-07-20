@@ -27,20 +27,26 @@ export function LocalChatList({
   const [loadingList, setLoadingList] = useState(true);
   const [successMessage, setSuccessMessage] = useState("");
   const [allowChatUpload, setAllowChatUpload] = useState(false);
+  const [listError, setListError] = useState("");
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
+    setListError("");
     try {
       const [nextChats, config] = await Promise.all([fetchLocalChatList(), fetchAppConfig()]);
       setChats(nextChats);
       setAllowChatUpload(config.allowChatUpload);
-    } catch {
+    } catch (error) {
       setChats([]);
       setAllowChatUpload(false);
+      const message =
+        error instanceof Error ? error.message : "Chat-Liste konnte nicht geladen werden.";
+      setListError(message);
+      onError(message);
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [onError]);
 
   useEffect(() => {
     void loadList();
@@ -50,6 +56,7 @@ export function LocalChatList({
     <div className="grid gap-4">
       {allowChatUpload && (
         <ChatUploadForm
+          existingSlugs={chats.map((chat) => chat.slug)}
           onError={onError}
           onCompleted={async () => {
             setSuccessMessage("Chat ist bereit und erscheint in der Liste.");
@@ -76,11 +83,21 @@ export function LocalChatList({
           </p>
         )}
 
+        {listError && (
+          <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            {listError}
+          </p>
+        )}
+
         {loadingList ? (
           <p className="mt-5 text-sm text-[var(--wa-muted)]">Chats werden geladen…</p>
         ) : chats.length === 0 ? (
           <p className="mt-5 text-sm text-[var(--wa-muted)]">
-            Noch keine Chats vorhanden. Lade oben einen WhatsApp-Export als ZIP hoch.
+            {listError
+              ? "Liste konnte nicht geladen werden."
+              : allowChatUpload
+                ? "Noch keine Chats vorhanden. Lade oben einen WhatsApp-Export als ZIP hoch."
+                : "Noch keine Chats vorhanden."}
           </p>
         ) : (
           <div className="mt-5 grid gap-3">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { normalizeSlugInput } from "@/lib/slug-name";
 
@@ -18,9 +18,13 @@ type UploadJob = {
 };
 
 interface ChatUploadFormProps {
+  existingSlugs?: string[];
   onCompleted: () => void | Promise<void>;
   onError: (message: string) => void;
 }
+
+const POLL_TIMEOUT_MS = 45 * 60 * 1000;
+const POLL_INTERVAL_MS = 1000;
 
 function statusLabel(status: UploadJob["status"]): string {
   switch (status) {
@@ -39,32 +43,52 @@ function statusLabel(status: UploadJob["status"]): string {
   }
 }
 
-export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
+export function ChatUploadForm({
+  existingSlugs = [],
+  onCompleted,
+  onError,
+}: ChatUploadFormProps) {
   const [slugInput, setSlugInput] = useState("");
   const [title, setTitle] = useState("");
   const [defaultMyName, setDefaultMyName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [job, setJob] = useState<UploadJob | null>(null);
   const [busy, setBusy] = useState(false);
+  const mountedRef = useRef(true);
 
   const slugPreview = useMemo(() => normalizeSlugInput(slugInput), [slugInput]);
+  const willOverwrite = Boolean(slugPreview && existingSlugs.includes(slugPreview));
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function pollJob(jobId: string): Promise<UploadJob> {
+    const started = Date.now();
+
     for (;;) {
+      if (Date.now() - started > POLL_TIMEOUT_MS) {
+        throw new Error("Die Verarbeitung dauert zu lange. Bitte später den Status prüfen.");
+      }
+
       const response = await fetch(`/api/chats/upload/${jobId}`);
       const data = (await response.json()) as UploadJob & { error?: string };
       if (!response.ok) {
         throw new Error(data.error || "Status konnte nicht geladen werden.");
       }
 
-      setJob(data);
+      if (mountedRef.current) setJob(data);
 
       if (data.status === "done" || data.status === "error") {
         return data;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
   }
 
@@ -72,9 +96,10 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/chats/upload");
+      xhr.timeout = POLL_TIMEOUT_MS;
 
       xhr.upload.onprogress = (event) => {
-        if (!event.lengthComputable) return;
+        if (!event.lengthComputable || !mountedRef.current) return;
         setUploadPercent(Math.round((event.loaded / event.total) * 100));
       };
 
@@ -92,6 +117,7 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
       };
 
       xhr.onerror = () => reject(new Error("Netzwerkfehler beim Upload."));
+      xhr.ontimeout = () => reject(new Error("Upload-Timeout. Bitte erneut versuchen."));
       xhr.send(formData);
     });
   }
@@ -109,6 +135,13 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
       return;
     }
 
+    if (willOverwrite) {
+      const ok = window.confirm(
+        `Chat „${slugPreview}“ existiert bereits und wird komplett ersetzt. Fortfahren?`,
+      );
+      if (!ok) return;
+    }
+
     setBusy(true);
     setJob(null);
     setUploadPercent(0);
@@ -121,7 +154,7 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
       if (defaultMyName.trim()) formData.set("defaultMyName", defaultMyName.trim());
 
       const { jobId } = await uploadWithProgress(formData);
-      setUploadPercent(100);
+      if (mountedRef.current) setUploadPercent(100);
 
       const result = await pollJob(jobId);
       if (result.status === "error") {
@@ -133,11 +166,12 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
       setTitle("");
       setDefaultMyName("");
       setFile(null);
+      setFileInputKey((key) => key + 1);
       await onCompleted();
     } catch (error) {
       onError(error instanceof Error ? error.message : "Upload fehlgeschlagen.");
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   }
 
@@ -152,7 +186,7 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
         </h2>
         <p className="mt-1 text-sm text-[var(--wa-muted)]">
           Lade den Chat als ZIP von WhatsApp hoch. Die App richtet ihn hier ein — vorhandene Chats
-          mit demselben Namen werden ersetzt.
+          mit demselben Namen werden nach Bestätigung ersetzt.
         </p>
       </div>
 
@@ -172,6 +206,7 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
           {slugPreview && (
             <span className="mt-1 block text-xs text-[var(--wa-muted)]">
               Wird gespeichert als: <code>{slugPreview}</code>
+              {willOverwrite ? " — ersetzt einen vorhandenen Chat" : ""}
             </span>
           )}
         </label>
@@ -207,6 +242,7 @@ export function ChatUploadForm({ onCompleted, onError }: ChatUploadFormProps) {
             WhatsApp-ZIP
           </span>
           <input
+            key={fileInputKey}
             type="file"
             accept=".zip,application/zip"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}

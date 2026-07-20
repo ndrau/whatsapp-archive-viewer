@@ -65,10 +65,12 @@ Package auf GitHub ggf. **Public** stellen.
 
 1. **Stacks** → Add stack  
 2. `docker-compose.yml` einfügen  
-3. `ARCHIVE_PASSWORD` + `AUTH_SECRET` setzen  
+3. Stack-Environment: `ARCHIVE_PASSWORD` + `AUTH_SECRET` (mind. 32 Zeichen, z. B. `openssl rand -base64 32`) — Compose startet ohne diese Variablen nicht  
 4. Optional: `ALLOW_CHAT_UPLOAD=false` wenn keine neuen Uploads mehr erlaubt sein sollen  
 5. Volumes: `data` → `/app/chats`, `built` → `/app/.built`  
 6. Deploy → `http://<NAS-IP>:9180` → Login  
+
+**Security-Hinweis:** Nach dem Login sind Chat-Medien nur noch mit Session erreichbar. Container möglichst nicht dauerhaft als root betreiben (`user: "0:0"` nur wegen TrueNAS-Rechten — besser `chown 1001:1001` auf die Datasets).
 
 ## Chats hinzufügen
 

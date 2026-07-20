@@ -13,7 +13,7 @@ import { ChatTimeline, type ChatTimelineHandle } from "@/components/ChatTimeline
 import { MobileTimelineScrubber, type MobileTimelineScrubberHandle } from "@/components/MobileTimelineScrubber";
 import { MediaLightbox } from "@/components/MediaLightbox";
 import { MediaGroupBubble, MessageBubble } from "@/components/MessageBubble";
-import { DEFAULT_DAY_RADIUS, dayKeyFromDate } from "@/lib/chat-day";
+import { DEFAULT_DAY_RADIUS, MAX_LOADED_DAYS, dayKeyFromDate } from "@/lib/chat-day";
 import { buildChatTimeline, type TimelineDay } from "@/lib/chat-timeline";
 import {
   buildVirtualRows,
@@ -79,8 +79,11 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeDayKey, setActiveDayKey] = useState<string>();
   const [loadingWindow, setLoadingWindow] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<VirtualChatRow[]>([]);
   const [searchActive, setSearchActive] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [highlightMessageId, setHighlightMessageId] = useState<string>();
   const [lightbox, setLightbox] = useState<{
     items: MediaGalleryItem[];
@@ -183,9 +186,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
     const scrollOnce = (): boolean => {
       if (target.messageId) {
-        const el = container.querySelector<HTMLElement>(
-          `[data-message-id="${escapeAttr(target.messageId)}"]`,
-        );
+        const id = escapeAttr(target.messageId);
+        const el =
+          container.querySelector<HTMLElement>(`[data-message-id="${id}"]`) ??
+          container.querySelector<HTMLElement>(`[data-message-ids~="${id}"]`);
         if (el) {
           el.scrollIntoView({ block: "center", behavior: "auto" });
           return true;
@@ -242,6 +246,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       if (!options?.preserveScroll) {
         setLoadingWindow(true);
       }
+      setLoadError(null);
 
       try {
         const response = await loadChatMessageRange(chatIndex.slug, fromDay, toDay);
@@ -254,6 +259,7 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
 
         windowRangeRef.current = { start: startIndex, end: endIndex };
         setMessages(nextMessages);
+        setLoadError(null);
 
         if (options?.scrollTarget) {
           pendingScrollRef.current = options.scrollTarget;
@@ -272,6 +278,9 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       } catch (error) {
         if (generation !== loadGenerationRef.current) return;
         console.error("Nachrichtenfenster konnte nicht geladen werden.", error);
+        setLoadError(
+          error instanceof Error ? error.message : "Nachrichten konnten nicht geladen werden.",
+        );
       } finally {
         if (generation === loadGenerationRef.current) {
           windowLoadingRef.current = false;
@@ -328,7 +337,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     setActiveDayKey(undefined);
     setSearchActive(false);
     setSearchResults([]);
+    setSearchError(null);
+    setSearchLoading(false);
     setHighlightMessageId(undefined);
+    setLoadError(null);
     setLoadingWindow(true);
     windowRangeRef.current = { start: 0, end: 0 };
     scrollReadyRef.current = false;
@@ -341,7 +353,10 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
   useEffect(() => {
     if (hasInitializedRef.current) return;
     const lastIndex = chatIndex.days.length - 1;
-    if (lastIndex < 0) return;
+    if (lastIndex < 0) {
+      setLoadingWindow(false);
+      return;
+    }
 
     hasInitializedRef.current = true;
     const startIndex = Math.max(0, lastIndex - DEFAULT_DAY_RADIUS);
@@ -361,25 +376,43 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         if (generation !== searchGenerationRef.current) return;
         setSearchActive(false);
         setSearchResults([]);
+        setSearchError(null);
+        setSearchLoading(false);
         return;
       }
 
-      const response = await searchChatMessages(chatIndex.slug, normalized);
-      if (generation !== searchGenerationRef.current) return;
+      setSearchLoading(true);
+      setSearchError(null);
 
-      setSearchActive(true);
-      setSearchResults(
-        response.results.map((result) => ({
-          kind: "search-result" as const,
-          id: result.id,
-          messageId: result.id,
-          dayKey: dayKeyFromDate(new Date(result.date)),
-          sender: result.sender,
-          text: result.text,
-          date: new Date(result.date),
-          attachment: result.attachment,
-        })),
-      );
+      try {
+        const response = await searchChatMessages(chatIndex.slug, normalized);
+        if (generation !== searchGenerationRef.current) return;
+
+        setSearchActive(true);
+        setSearchResults(
+          response.results.map((result) => ({
+            kind: "search-result" as const,
+            id: result.id,
+            messageId: result.id,
+            dayKey: dayKeyFromDate(new Date(result.date)),
+            sender: result.sender,
+            text: result.text,
+            date: new Date(result.date),
+            attachment: result.attachment,
+          })),
+        );
+      } catch (error) {
+        if (generation !== searchGenerationRef.current) return;
+        setSearchActive(true);
+        setSearchResults([]);
+        setSearchError(
+          error instanceof Error ? error.message : "Suche fehlgeschlagen.",
+        );
+      } finally {
+        if (generation === searchGenerationRef.current) {
+          setSearchLoading(false);
+        }
+      }
     }, 250);
 
     return () => clearTimeout(searchTimerRef.current);
@@ -405,11 +438,20 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
       const container = scrollRef.current;
       const { start, end } = windowRangeRef.current;
       const generation = loadGenerationRef.current;
+      const dayKeys = chatIndex.days;
+
+      const allowedDayKeys = (rangeStart: number, rangeEnd: number) =>
+        new Set(dayKeys.slice(rangeStart, rangeEnd + 1).map((day) => day.key));
 
       if (direction === "prev" && start > 0) {
         const nextStart = Math.max(0, start - DEFAULT_DAY_RADIUS);
-        const fromDay = chatIndex.days[nextStart]?.key;
-        const toDay = chatIndex.days[start - 1]?.key;
+        let nextEnd = end;
+        if (nextEnd - nextStart + 1 > MAX_LOADED_DAYS) {
+          nextEnd = nextStart + MAX_LOADED_DAYS - 1;
+        }
+
+        const fromDay = dayKeys[nextStart]?.key;
+        const toDay = dayKeys[start - 1]?.key;
         if (!fromDay || !toDay || nextStart === start) return false;
 
         extendLoadingRef.current = true;
@@ -432,18 +474,22 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             ...message,
             date: new Date(message.date),
           }));
+          const keepKeys = allowedDayKeys(nextStart, nextEnd);
+          const trimTail = nextEnd < end;
 
           let didPrepend = false;
           setMessages((current) => {
             const knownIds = new Set(current.map((message) => message.id));
             const prepended = incoming.filter((message) => !knownIds.has(message.id));
-            if (prepended.length === 0) return current;
-            didPrepend = true;
-            return [...prepended, ...current];
+            if (prepended.length === 0 && !trimTail) return current;
+            didPrepend = prepended.length > 0 || trimTail;
+            const merged = [...prepended, ...current];
+            if (!trimTail) return merged;
+            return merged.filter((message) => keepKeys.has(dayKeyFromDate(message.date)));
           });
 
           if (didPrepend) {
-            windowRangeRef.current = { start: nextStart, end };
+            windowRangeRef.current = { start: nextStart, end: nextEnd };
           } else {
             scrollAnchorRef.current = null;
           }
@@ -457,10 +503,15 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
         }
       }
 
-      if (direction === "next" && end < chatIndex.days.length - 1) {
-        const nextEnd = Math.min(chatIndex.days.length - 1, end + DEFAULT_DAY_RADIUS);
-        const fromDay = chatIndex.days[end + 1]?.key;
-        const toDay = chatIndex.days[nextEnd]?.key;
+      if (direction === "next" && end < dayKeys.length - 1) {
+        let nextStart = start;
+        const nextEnd = Math.min(dayKeys.length - 1, end + DEFAULT_DAY_RADIUS);
+        if (nextEnd - nextStart + 1 > MAX_LOADED_DAYS) {
+          nextStart = nextEnd - MAX_LOADED_DAYS + 1;
+        }
+
+        const fromDay = dayKeys[end + 1]?.key;
+        const toDay = dayKeys[nextEnd]?.key;
         if (!fromDay || !toDay || nextEnd === end) return false;
 
         extendLoadingRef.current = true;
@@ -473,18 +524,22 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             ...message,
             date: new Date(message.date),
           }));
+          const keepKeys = allowedDayKeys(nextStart, nextEnd);
+          const trimHead = nextStart > start;
 
           let didAppend = false;
           setMessages((current) => {
             const knownIds = new Set(current.map((message) => message.id));
             const appended = incoming.filter((message) => !knownIds.has(message.id));
-            if (appended.length === 0) return current;
-            didAppend = true;
-            return [...current, ...appended];
+            if (appended.length === 0 && !trimHead) return current;
+            didAppend = appended.length > 0 || trimHead;
+            const merged = [...current, ...appended];
+            if (!trimHead) return merged;
+            return merged.filter((message) => keepKeys.has(dayKeyFromDate(message.date)));
           });
 
           if (didAppend) {
-            windowRangeRef.current = { start, end: nextEnd };
+            windowRangeRef.current = { start: nextStart, end: nextEnd };
           }
           return didAppend;
         } catch (error) {
@@ -700,8 +755,13 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
     [chatIndex.days, loadRangeByIndices, previewTimelineDay],
   );
 
-  const searchEmpty = searchActive && searchResults.length === 0 && Boolean(searchQuery.trim());
-  const chatEmpty = !searchActive && messages.length === 0 && !loadingWindow;
+  const searchEmpty =
+    searchActive &&
+    !searchLoading &&
+    !searchError &&
+    searchResults.length === 0 &&
+    Boolean(searchQuery.trim());
+  const chatEmpty = !searchActive && messages.length === 0 && !loadingWindow && !loadError;
 
   return (
     <>
@@ -713,7 +773,33 @@ export function ChatViewer({ chatIndex, exportData, myName, searchQuery }: ChatV
             </div>
           )}
 
-          {searchEmpty || chatEmpty ? (
+          {loadError && !searchActive ? (
+            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-10 text-center">
+              <p className="text-sm text-red-700">{loadError}</p>
+              <button
+                type="button"
+                className="rounded-full bg-[var(--wa-accent)] px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => {
+                  const lastIndex = chatIndex.days.length - 1;
+                  if (lastIndex < 0) return;
+                  const startIndex = Math.max(0, lastIndex - DEFAULT_DAY_RADIUS);
+                  void loadRangeByIndices(startIndex, lastIndex, {
+                    scrollTarget: { dayKey: chatIndex.days[lastIndex]?.key, align: "end" },
+                  });
+                }}
+              >
+                Erneut versuchen
+              </button>
+            </div>
+          ) : searchError ? (
+            <div className="flex min-h-[40vh] items-center justify-center p-10 text-center text-sm text-red-700">
+              {searchError}
+            </div>
+          ) : searchLoading && searchActive ? (
+            <div className="flex min-h-[40vh] items-center justify-center p-10 text-center text-sm text-[var(--wa-muted)]">
+              Suche läuft…
+            </div>
+          ) : searchEmpty || chatEmpty ? (
             <div className="flex min-h-[40vh] items-center justify-center p-10 text-center text-[var(--wa-muted)]">
               {searchEmpty ? "Keine Nachrichten für diese Suche gefunden." : "Keine Nachrichten in diesem Chat."}
             </div>
@@ -860,8 +946,16 @@ function ChatRow({
   }
 
   if (row.item.kind === "media-group") {
+    const highlighted = Boolean(
+      highlightMessageId &&
+        row.item.messages.some((message) => message.id === highlightMessageId),
+    );
     return (
-      <div data-day-key={row.dayKey} data-message-id={row.id}>
+      <div
+        data-day-key={row.dayKey}
+        data-message-ids={row.item.messages.map((message) => message.id).join(" ")}
+        className={highlighted ? "rounded-2xl ring-2 ring-[var(--wa-accent)]/40" : undefined}
+      >
         <MediaGroupBubble
           sender={row.item.sender}
           date={row.item.date}
