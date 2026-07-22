@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { chunkIdFromDate, dayKeyFromDate } from "@/lib/chat-day";
+import { prewarmPlayableAudioForChat } from "@/lib/media-response";
 import { isValidSlug } from "@/lib/slug";
 import { parseWhatsAppChat } from "@/lib/whatsapp-parser";
 import {
@@ -264,6 +265,17 @@ export async function buildChat(slug: string): Promise<BuiltChatIndex> {
   );
 
   await fs.rm(path.join(builtDir, "chat.json"), { force: true });
+
+  // Opus/Ogg → AAC so iOS Safari can play voice notes without waiting on first open.
+  const playable = await prewarmPlayableAudioForChat(sourceDir, mediaFiles);
+  if (playable.total > 0) {
+    console.log(
+      `[build:${slug}] playable audio: ${playable.converted} converted, ${playable.cached} cached, ${playable.failed} failed (${playable.total} Opus/Ogg)`,
+    );
+    for (const entry of playable.errors.slice(0, 5)) {
+      console.warn(`[build:${slug}] audio convert failed: ${entry.file} — ${entry.error}`);
+    }
+  }
 
   return index;
 }

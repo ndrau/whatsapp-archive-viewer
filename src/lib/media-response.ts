@@ -102,34 +102,31 @@ async function transcodeOpusToAac(inputPath: string, outputPath: string): Promis
   }
 }
 
-/**
- * iOS Safari cannot play WhatsApp Opus/Ogg voice notes. Convert once to AAC/M4A
- * and cache under `.built/playable/` so desktop and mobile share the same URL.
- */
-export async function resolvePlayableMedia(
-  originalPath: string,
-): Promise<{ filePath: string; contentType: string }> {
-  const ext = path.extname(originalPath).toLowerCase();
-  if (!IOS_INCOMPATIBLE_AUDIO.has(ext)) {
-    return {
-      filePath: originalPath,
-      contentType: getMediaContentType(originalPath),
-    };
-  }
+function isIosIncompatibleAudio(filePath: string): boolean {
+  return IOS_INCOMPATIBLE_AUDIO.has(path.extname(filePath).toLowerCase());
+}
 
-  const stats = await fs.stat(originalPath);
+function playableCachePath(originalPath: string, mtimeMs: number, size: number): string {
   const cacheKey = createHash("sha1")
     .update(originalPath)
     .update("\0")
-    .update(String(stats.mtimeMs))
+    .update(String(mtimeMs))
     .update("\0")
-    .update(String(stats.size))
+    .update(String(size))
     .digest("hex");
-  const outputPath = path.join(PLAYABLE_DIR, `${cacheKey}.m4a`);
+  return path.join(PLAYABLE_DIR, `${cacheKey}.m4a`);
+}
+
+async function ensureAacCache(originalPath: string): Promise<{
+  filePath: string;
+  created: boolean;
+}> {
+  const stats = await fs.stat(originalPath);
+  const outputPath = playableCachePath(originalPath, stats.mtimeMs, stats.size);
 
   try {
     await fs.access(outputPath);
-    return { filePath: outputPath, contentType: "audio/mp4" };
+    return { filePath: outputPath, created: false };
   } catch {
     // need transcode
   }
@@ -137,7 +134,7 @@ export async function resolvePlayableMedia(
   const existing = transcodeLocks.get(outputPath);
   if (existing) {
     const filePath = await existing;
-    return { filePath, contentType: "audio/mp4" };
+    return { filePath, created: false };
   }
 
   const pending = transcodeOpusToAac(originalPath, outputPath)
@@ -148,7 +145,86 @@ export async function resolvePlayableMedia(
 
   transcodeLocks.set(outputPath, pending);
   const filePath = await pending;
+  return { filePath, created: true };
+}
+
+/**
+ * iOS Safari cannot play WhatsApp Opus/Ogg voice notes. Convert once to AAC/M4A
+ * and cache under `.built/playable/` so desktop and mobile share the same URL.
+ */
+export async function resolvePlayableMedia(
+  originalPath: string,
+): Promise<{ filePath: string; contentType: string }> {
+  if (!isIosIncompatibleAudio(originalPath)) {
+    return {
+      filePath: originalPath,
+      contentType: getMediaContentType(originalPath),
+    };
+  }
+
+  const { filePath } = await ensureAacCache(originalPath);
   return { filePath, contentType: "audio/mp4" };
+}
+
+export interface PrewarmPlayableAudioResult {
+  total: number;
+  converted: number;
+  cached: number;
+  failed: number;
+  errors: Array<{ file: string; error: string }>;
+}
+
+/**
+ * Convert all Opus/Ogg files in a chat during build so iPhone playback is
+ * instant. Safe to re-run: existing AAC caches are reused.
+ */
+export async function prewarmPlayableAudioForChat(
+  sourceDir: string,
+  mediaFiles: string[],
+  options?: { concurrency?: number },
+): Promise<PrewarmPlayableAudioResult> {
+  const targets = mediaFiles.filter((file) => isIosIncompatibleAudio(file));
+  const concurrency = Math.max(1, Math.min(options?.concurrency ?? 2, 4));
+  const result: PrewarmPlayableAudioResult = {
+    total: targets.length,
+    converted: 0,
+    cached: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (targets.length === 0) {
+    return result;
+  }
+
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < targets.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const file = targets[index]!;
+      const originalPath = path.join(sourceDir, file);
+
+      try {
+        const { created } = await ensureAacCache(originalPath);
+        if (created) result.converted += 1;
+        else result.cached += 1;
+      } catch (error) {
+        result.failed += 1;
+        result.errors.push({
+          file,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, targets.length) }, () => worker()),
+  );
+
+  return result;
 }
 
 function commonHeaders(contentType: string): HeadersInit {
