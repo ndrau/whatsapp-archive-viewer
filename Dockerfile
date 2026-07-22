@@ -28,8 +28,9 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV BUILD_CHATS_ON_START=1
 
+# ffmpeg: Opus/Ogg Sprachnachrichten → AAC für iOS Safari
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates unzip \
+  && apt-get install -y --no-install-recommends ca-certificates unzip ffmpeg \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g tsx@4.23.1 \
   && addgroup --system --gid 1001 nodejs \

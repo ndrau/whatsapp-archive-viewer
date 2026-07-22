@@ -86,6 +86,7 @@ function MediaAttachment({
         className="relative mb-2 block w-full max-w-full text-left"
       >
         <video
+          playsInline
           preload="metadata"
           src={mediaUrl}
           className="h-64 w-full max-w-full rounded-xl bg-black/5 object-cover"

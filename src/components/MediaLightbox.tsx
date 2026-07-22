@@ -111,7 +111,9 @@ export function MediaLightbox({
         ) : current.attachment.kind === "video" ? (
           <video
             controls
+            playsInline
             autoPlay
+            preload="metadata"
             src={mediaUrl}
             className="max-h-[90vh] max-w-[92vw] rounded-xl"
           />

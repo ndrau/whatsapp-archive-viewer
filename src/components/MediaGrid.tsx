@@ -206,7 +206,9 @@ export function MediaGrid({ items, exportData, onOpen }: MediaGridProps) {
             ) : item.attachment.kind === "video" ? (
               <>
                 <video
+                  playsInline
                   preload="metadata"
+                  muted
                   src={mediaUrl}
                   className="h-full w-full object-cover"
                 />

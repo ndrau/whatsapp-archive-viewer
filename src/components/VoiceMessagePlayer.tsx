@@ -137,8 +137,15 @@ export function VoiceMessagePlayer({
   }
 
   return (
-    <div className="voice-message mb-0.5 min-w-[260px] max-w-[340px]">
-      <audio ref={audioRef} preload="auto" src={src} className="hidden" />
+    <div className="voice-message relative mb-0.5 min-w-[260px] max-w-[340px]">
+      <audio
+        ref={audioRef}
+        preload="auto"
+        src={src}
+        playsInline
+        className="pointer-events-none absolute h-px w-px opacity-0"
+        aria-hidden="true"
+      />
 
       <div className="flex items-center gap-2.5">
         <button

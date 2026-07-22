@@ -1,14 +1,19 @@
-import { readFile } from "fs/promises";
 import { NextResponse } from "next/server";
 
-import { getMediaContentType, resolveLocalMediaPath } from "@/lib/local-chats";
+import { resolveLocalMediaPath } from "@/lib/local-chats";
+import {
+  createMediaResponse,
+  resolvePlayableMedia,
+} from "@/lib/media-response";
 import { requireApiSession } from "@/lib/require-auth";
+
+export const runtime = "nodejs";
 
 interface RouteParams {
   params: Promise<{ slug: string; file: string[] }>;
 }
 
-export async function GET(request: Request, { params }: RouteParams) {
+async function handleMedia(request: Request, { params }: RouteParams) {
   const authError = await requireApiSession(request);
   if (authError) return authError;
 
@@ -16,19 +21,20 @@ export async function GET(request: Request, { params }: RouteParams) {
     const { slug, file } = await params;
     const filename = decodeURIComponent(file.join("/"));
     const mediaPath = await resolveLocalMediaPath(slug, filename);
-    const buffer = await readFile(mediaPath);
-
-    return new NextResponse(buffer, {
-      headers: {
-        "Content-Type": getMediaContentType(mediaPath),
-        "Cache-Control": "private, max-age=3600",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
+    const playable = await resolvePlayableMedia(mediaPath);
+    return createMediaResponse(request, playable.filePath, playable.contentType);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Mediendatei nicht gefunden." },
-      { status: 404 },
-    );
+    const message =
+      error instanceof Error ? error.message : "Mediendatei nicht gefunden.";
+    const status = /ffmpeg/i.test(message) ? 500 : 404;
+    return NextResponse.json({ error: message }, { status });
   }
+}
+
+export async function GET(request: Request, context: RouteParams) {
+  return handleMedia(request, context);
+}
+
+export async function HEAD(request: Request, context: RouteParams) {
+  return handleMedia(request, context);
 }
