@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { resolveLocalMediaPath } from "@/lib/local-chats";
-import {
-  createMediaResponse,
-  resolvePlayableMedia,
-} from "@/lib/media-response";
+import { resolvePlayableMedia } from "@/lib/media-playable";
+import { createMediaResponse } from "@/lib/media-response";
 import { requireApiSession } from "@/lib/require-auth";
 
 export const runtime = "nodejs";

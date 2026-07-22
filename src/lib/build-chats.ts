@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { chunkIdFromDate, dayKeyFromDate } from "@/lib/chat-day";
-import { prewarmPlayableAudioForChat } from "@/lib/media-response";
+import { prewarmPlayableAudioForChat } from "@/lib/media-playable";
 import { isValidSlug } from "@/lib/slug";
 import { parseWhatsAppChat } from "@/lib/whatsapp-parser";
 import {
